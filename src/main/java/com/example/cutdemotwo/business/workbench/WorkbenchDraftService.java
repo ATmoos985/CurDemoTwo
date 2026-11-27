@@ -1,9 +1,11 @@
 package com.example.cutdemotwo.business.workbench;
 
 import com.example.cutdemotwo.business.cutting.CuttingStatePort;
+import com.example.cutdemotwo.business.cutting.SchedulingStudioService;
 import com.example.cutdemotwo.business.model.CuttingTask;
 import com.example.cutdemotwo.business.model.MotherRollInfo;
 import com.example.cutdemotwo.business.model.RemnantStock;
+import com.example.cutdemotwo.business.model.SchedulingScheme;
 import com.example.cutdemotwo.business.optimization.OptimizationService;
 import com.example.cutdemotwo.contracts.jobs.OptimizationFailure;
 import com.example.cutdemotwo.contracts.jobs.OptimizationResult;
@@ -11,7 +13,11 @@ import com.example.cutdemotwo.contracts.jobs.StoredOptimizationJob;
 import com.example.cutdemotwo.contracts.jobs.WorkbenchJobSource;
 import com.example.cutdemotwo.contracts.jobs.WorkbenchSchemeDraft;
 import com.example.cutdemotwo.persistence.WorkbenchDraftStore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
@@ -21,33 +27,56 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Supplier;
 
 /**
  * 工作台待人工确认草案服务：
  * <ul>
  *   <li>创建并持久化草案至独立 {@link WorkbenchDraftStore}，绝不写或扣任何实物库存，亦不提升库存 revision；</li>
- *   <li>计算防篡改 SHA-256 {@code contentHash}、审批令牌 {@code approvalToken} 与工业风险预检 {@code riskChecks}；</li>
- *   <li>查询时按当前时钟动态判定 {@code EXPIRED}，并只读核对当前任务与库存 revision 及材料状态输出 {@code stale} / {@code staleReasons}。</li>
+ *   <li>支持列表倒序分页、批组聚合、CAS 原子确认/作废、与正式落库联动回写及定时过期滚动清理；</li>
+ *   <li>查询时按当前时钟动态判定 {@code EXPIRED}，并只读核对任务与库存 revision（已终态草案永不被覆盖为 EXPIRED）。</li>
  * </ul>
  */
 @Service
 public class WorkbenchDraftService {
+    private static final Logger log = LoggerFactory.getLogger(WorkbenchDraftService.class);
+
     public static final long DEFAULT_TTL_SECONDS = 1800L;
     public static final long MIN_TTL_SECONDS = 1L;
     public static final long MAX_TTL_SECONDS = 86_400L;
+    public static final long DEFAULT_RETENTION_HOURS = 168L;
     private static final Set<String> VALID_MATERIAL_TYPES = Set.of("STOCK_ROLL", "REMNANT", "FREE_CANVAS");
+    private static final Set<String> VALID_QUERY_STATUSES = Set.of(
+            "ALL",
+            WorkbenchSchemeDraft.STATUS_PENDING_CONFIRMATION,
+            WorkbenchSchemeDraft.STATUS_CONFIRMED,
+            WorkbenchSchemeDraft.STATUS_DISCARDED,
+            WorkbenchSchemeDraft.STATUS_EXPIRED
+    );
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private final CuttingStatePort cuttingStatePort;
     private final OptimizationService optimizationService;
     private final WorkbenchDraftStore draftStore;
     private final Clock clock;
+    private final ConcurrentHashMap<String, DraftLockEntry> draftLocks = new ConcurrentHashMap<>();
+
+    private static final class DraftLockEntry {
+        final ReentrantLock lock = new ReentrantLock();
+        int refs = 0;
+    }
+
+    @Value("${cutdemo.workbench.drafts.retention-hours:168}")
+    private long retentionHours = DEFAULT_RETENTION_HOURS;
 
     @Autowired
     public WorkbenchDraftService(
@@ -79,6 +108,34 @@ public class WorkbenchDraftService {
             Long ttlSeconds
     ) {}
 
+    public record DraftListPage(
+            List<WorkbenchSchemeDraft> items,
+            long total,
+            int page,
+            int size,
+            long pendingCount
+    ) {}
+
+    public record ConfirmDraftRequest(
+            String schemeId,
+            String operator
+    ) {}
+
+    public record DiscardDraftRequest(
+            String reason,
+            String operator
+    ) {}
+
+    private record PreparedDraftInput(
+            StoredOptimizationJob doc,
+            String resultId,
+            String taskId,
+            String materialType,
+            String materialId,
+            String note,
+            long ttlSeconds
+    ) {}
+
     private record SnapshotCheck(
             Long snapshotTaskRevision,
             Long snapshotMaterialRevision,
@@ -88,6 +145,48 @@ public class WorkbenchDraftService {
 
     /** 创建持久化待人工确认草案（绝不修改或锁扣实物库存）。 */
     public WorkbenchSchemeDraft createDraft(CreateDraftRequest req) {
+        PreparedDraftInput prepared = prepareCreateInput(req);
+        SnapshotCheck check = cuttingStatePort.inRead(tx ->
+                evaluateCreateChecks(tx, prepared.doc().result(), prepared.doc().workbenchSource(),
+                        prepared.taskId(), prepared.materialType(), prepared.materialId())
+        );
+        WorkbenchSchemeDraft draft = assembleDraft(prepared, check, null, null, null);
+        return draftStore.save(draft);
+    }
+
+    /** 批量创建共享同一 {@code batchGroupId} 的一组待人工确认草案（绝不修改或锁扣实物库存）。 */
+    public List<WorkbenchSchemeDraft> createBatchDrafts(String batchGroupId, List<CreateDraftRequest> requests) {
+        if (batchGroupId == null || batchGroupId.isBlank()) {
+            throw failure("INVALID_INPUT", "批量草案组编号 batchGroupId 不能为空", 400);
+        }
+        if (requests == null || requests.isEmpty()) {
+            return List.of();
+        }
+        String cleanGroupId = batchGroupId.trim();
+        List<PreparedDraftInput> preparedList = new ArrayList<>(requests.size());
+        for (CreateDraftRequest req : requests) {
+            preparedList.add(prepareCreateInput(req));
+        }
+        List<SnapshotCheck> checks = cuttingStatePort.inRead(tx -> {
+            List<SnapshotCheck> out = new ArrayList<>(preparedList.size());
+            for (PreparedDraftInput p : preparedList) {
+                out.add(evaluateCreateChecks(
+                        tx, p.doc().result(), p.doc().workbenchSource(),
+                        p.taskId(), p.materialType(), p.materialId()
+                ));
+            }
+            return out;
+        });
+
+        int total = preparedList.size();
+        List<WorkbenchSchemeDraft> drafts = new ArrayList<>(total);
+        for (int i = 0; i < total; i++) {
+            drafts.add(assembleDraft(preparedList.get(i), checks.get(i), cleanGroupId, i + 1, total));
+        }
+        return draftStore.saveAll(drafts);
+    }
+
+    private PreparedDraftInput prepareCreateInput(CreateDraftRequest req) {
         if (req == null || req.resultId() == null || req.resultId().isBlank()) {
             throw failure("INVALID_INPUT", "创建草案必须提供 resultId", 400);
         }
@@ -110,36 +209,46 @@ public class WorkbenchDraftService {
         }
 
         WorkbenchJobSource source = doc.workbenchSource();
-        String taskId = resolveAndCheckField("taskId", req.taskId(), source == null ? null : source.taskId(), "TASK_MISMATCH", "草案任务编号与结果归档来源不一致");
+        String taskId = resolveAndCheckField("taskId", req.taskId(), source == null ? null : source.taskId(),
+                "TASK_MISMATCH", "草案任务编号与结果归档来源不一致");
         String materialType = resolveMaterialType(req.materialType(), source == null ? null : source.materialType());
-        String materialId = resolveAndCheckField("materialId", req.materialId(), source == null ? null : source.materialId(), "MATERIAL_MISMATCH", "草案材料编号与结果归档来源不一致");
+        String materialId = resolveAndCheckField("materialId", req.materialId(), source == null ? null : source.materialId(),
+                "MATERIAL_MISMATCH", "草案材料编号与结果归档来源不一致");
+        return new PreparedDraftInput(doc, resultId, taskId, materialType, materialId, note, ttlSeconds);
+    }
 
-        SnapshotCheck check = cuttingStatePort.inRead(tx ->
-                evaluateCreateChecks(tx, doc.result(), source, taskId, materialType, materialId)
-        );
-
+    private WorkbenchSchemeDraft assembleDraft(
+            PreparedDraftInput p,
+            SnapshotCheck check,
+            String batchGroupId,
+            Integer batchIndex,
+            Integer batchTotal
+    ) {
         Instant now = clock.instant();
-        Instant expires = now.plusSeconds(ttlSeconds);
+        Instant expires = now.plusSeconds(p.ttlSeconds());
         String issuedAt = now.toString();
         String expiresAt = expires.toString();
         String draftId = "DFT-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12).toUpperCase(Locale.ROOT);
         String approvalToken = "APR-" + randomHex(16);
         String contentHash = sha256Hex(String.join("|",
                 "v1",
-                resultId,
-                Objects.toString(doc.result().inputHash(), ""),
-                Objects.toString(taskId, ""),
-                Objects.toString(materialType, ""),
-                Objects.toString(materialId, ""),
-                Objects.toString(note, ""),
+                p.resultId(),
+                Objects.toString(p.doc().result().inputHash(), ""),
+                Objects.toString(p.taskId(), ""),
+                Objects.toString(p.materialType(), ""),
+                Objects.toString(p.materialId(), ""),
+                Objects.toString(p.note(), ""),
+                Objects.toString(batchGroupId, ""),
                 issuedAt
         ));
 
-        WorkbenchSchemeDraft.Target target = new WorkbenchSchemeDraft.Target(resultId, taskId, materialId, materialType);
-        String workbenchUrl = WorkbenchTaskViewSupport.buildWorkbenchUrl(taskId, resultId, draftId);
+        WorkbenchSchemeDraft.Target target = new WorkbenchSchemeDraft.Target(
+                p.resultId(), p.taskId(), p.materialId(), p.materialType()
+        );
+        String workbenchUrl = WorkbenchTaskViewSupport.buildWorkbenchUrl(p.taskId(), p.resultId(), draftId);
         String nextStep = "请点击 workbenchUrl 在搭切工作台画布核对排料图、疵点避让与余料，确认无误后使用工作台「选定此方案」按钮完成正式锁料落库；本草案未修改任何实物库存。";
 
-        WorkbenchSchemeDraft draft = new WorkbenchSchemeDraft(
+        return new WorkbenchSchemeDraft(
                 draftId,
                 draftId,
                 WorkbenchSchemeDraft.STATUS_PENDING_CONFIRMATION,
@@ -147,7 +256,7 @@ public class WorkbenchDraftService {
                 contentHash,
                 issuedAt,
                 expiresAt,
-                ttlSeconds,
+                p.ttlSeconds(),
                 true,
                 false,
                 !check.staleReasons().isEmpty(),
@@ -156,11 +265,19 @@ public class WorkbenchDraftService {
                 check.riskChecks(),
                 workbenchUrl,
                 nextStep,
-                note,
+                p.note(),
                 check.snapshotTaskRevision(),
-                check.snapshotMaterialRevision()
+                check.snapshotMaterialRevision(),
+                batchGroupId,
+                batchIndex,
+                batchTotal,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
         );
-        return draftStore.save(draft);
     }
 
     /** 查询持久化草案并按最新时间、任务与库存版本动态重算过期与漂移状态（纯只读）。 */
@@ -170,6 +287,10 @@ public class WorkbenchDraftService {
         }
         WorkbenchSchemeDraft stored = draftStore.find(draftId.trim())
                 .orElseThrow(() -> failure("NOT_FOUND", "工作台草案不存在: " + draftId.trim(), 404));
+
+        if (stored.isFinalized()) {
+            return stored.withEvaluatedState(stored.status(), false, List.of());
+        }
 
         boolean expired = isExpired(stored.expiresAt(), clock.instant());
         String status = expired ? WorkbenchSchemeDraft.STATUS_EXPIRED : WorkbenchSchemeDraft.STATUS_PENDING_CONFIRMATION;
@@ -181,6 +302,323 @@ public class WorkbenchDraftService {
 
         List<String> staleReasons = cuttingStatePort.inRead(tx -> evaluateLiveStaleReasons(tx, stored, source));
         return stored.withEvaluatedState(status, !staleReasons.isEmpty(), staleReasons);
+    }
+
+    /** 按状态/任务/批组分页倒序查询草案列表（仅对非终态条目实时重算版本漂移）。 */
+    public DraftListPage listDrafts(String status, String taskId, String batchGroupId, int page, int size) {
+        if (page < 0) {
+            throw failure("INVALID_INPUT", "页码 page 不能为负数", 400);
+        }
+        if (size < 1 || size > 100) {
+            throw failure("INVALID_INPUT", "分页大小 size 须在 1–100 之间", 400);
+        }
+        String normStatus = (status == null || status.isBlank()) ? null : status.trim().toUpperCase(Locale.ROOT);
+        if (normStatus != null && !VALID_QUERY_STATUSES.contains(normStatus)) {
+            throw failure("INVALID_INPUT", "不支持的草案状态过滤条件: " + status, 400);
+        }
+        String cleanTaskId = (taskId == null || taskId.isBlank()) ? null : taskId.trim();
+        String cleanBatchGroupId = (batchGroupId == null || batchGroupId.isBlank()) ? null : batchGroupId.trim();
+
+        WorkbenchDraftStore.DraftPage rawPage = draftStore.query(
+                new WorkbenchDraftStore.DraftQuery(normStatus, cleanTaskId, cleanBatchGroupId, page, size),
+                clock.millis()
+        );
+        if (rawPage.items().isEmpty()) {
+            return new DraftListPage(List.of(), rawPage.total(), rawPage.page(), rawPage.size(), rawPage.pendingCount());
+        }
+
+        Map<String, WorkbenchJobSource> sourcesByDraft = new LinkedHashMap<>();
+        boolean hasLivePending = false;
+        for (WorkbenchSchemeDraft d : rawPage.items()) {
+            if (!d.isFinalized() && WorkbenchSchemeDraft.STATUS_PENDING_CONFIRMATION.equals(d.status())) {
+                hasLivePending = true;
+                String rid = d.target() == null ? null : d.target().resultId();
+                if (rid != null && !rid.isBlank()) {
+                    StoredOptimizationJob doc = optimizationService.findJobWithSource(rid);
+                    if (doc != null && doc.workbenchSource() != null) {
+                        sourcesByDraft.put(d.draftId(), doc.workbenchSource());
+                    }
+                }
+            }
+        }
+
+        List<WorkbenchSchemeDraft> evaluated = new ArrayList<>(rawPage.items().size());
+        if (hasLivePending) {
+            cuttingStatePort.inRead(tx -> {
+                for (WorkbenchSchemeDraft d : rawPage.items()) {
+                    if (d.isFinalized() || !WorkbenchSchemeDraft.STATUS_PENDING_CONFIRMATION.equals(d.status())) {
+                        evaluated.add(d.isFinalized() ? d.withEvaluatedState(d.status(), false, List.of()) : d);
+                    } else {
+                        List<String> reasons = evaluateLiveStaleReasons(tx, d, sourcesByDraft.get(d.draftId()));
+                        evaluated.add(d.withEvaluatedState(d.status(), !reasons.isEmpty(), reasons));
+                    }
+                }
+                return null;
+            });
+        } else {
+            for (WorkbenchSchemeDraft d : rawPage.items()) {
+                evaluated.add(d.isFinalized() ? d.withEvaluatedState(d.status(), false, List.of()) : d);
+            }
+        }
+
+        return new DraftListPage(List.copyOf(evaluated), rawPage.total(), rawPage.page(), rawPage.size(), rawPage.pendingCount());
+    }
+
+    /** 原子将待确认草案流转为 CONFIRMED（已确认/已作废/已过期返回 409，不存在返回 404）。 */
+    public WorkbenchSchemeDraft confirmDraft(String draftId, ConfirmDraftRequest req, String actor) {
+        String cleanId = requireDraftId(draftId);
+        String schemeId = (req == null || req.schemeId() == null || req.schemeId().isBlank()) ? null : req.schemeId().trim();
+        String operator = resolveOperator(req == null ? null : req.operator(), actor);
+
+        return withDraftLock(cleanId, () -> {
+            Instant now = clock.instant();
+            WorkbenchDraftStore.TransitionResult result = draftStore.transitionFromPending(
+                    cleanId,
+                    now.toEpochMilli(),
+                    current -> current.withConfirmed(schemeId, operator, now.toString())
+            );
+            return unwrapTransitionOrThrow(cleanId, result);
+        });
+    }
+
+    /** 原子将待确认草案流转为 DISCARDED 并记录作废原因（绝不修改或恢复实物库存）。 */
+    public WorkbenchSchemeDraft discardDraft(String draftId, DiscardDraftRequest req, String actor) {
+        String cleanId = requireDraftId(draftId);
+        String rawReason = req == null ? null : req.reason();
+        String cleanReason = (rawReason == null || rawReason.isBlank()) ? null : rawReason.trim();
+        if (cleanReason != null && cleanReason.length() > 500) {
+            throw failure("INVALID_INPUT", "草案作废原因长度不能超过 500 字符", 400);
+        }
+        String operator = resolveOperator(req == null ? null : req.operator(), actor);
+
+        return withDraftLock(cleanId, () -> {
+            Instant now = clock.instant();
+            WorkbenchDraftStore.TransitionResult result = draftStore.transitionFromPending(
+                    cleanId,
+                    now.toEpochMilli(),
+                    current -> current.withDiscarded(operator, now.toString(), cleanReason)
+            );
+            return unwrapTransitionOrThrow(cleanId, result);
+        });
+    }
+
+    /**
+     * 无环联动协调入口（由 {@code StudioWorkflowController} 调用，严禁 {@code business.cutting} 反向引用本包）：
+     * 1) 按 {@code draftId} 粒度互斥加锁，彻底消除“预检→落库→CAS回写”期间与作废/重复确认的竞态窗口；
+     * 2) 预检关联草案必须处于 {@code PENDING_CONFIRMATION} 且未过期（已确认时仅当幂等键命中同方案才放行重放）；
+     * 3) 调用 {@link SchedulingStudioService#confirmScheme} 完成正式锁料落库；
+     * 4) 原子 CAS 回写草案状态为 {@code CONFIRMED} 并绑定正式 {@code schemeId}。
+     */
+    public Map<String, Object> confirmSchemeWithDraft(
+            SchedulingStudioService.ConfirmSchemeCommand cmd,
+            SchedulingStudioService studioService,
+            String actor
+    ) {
+        if (cmd == null || cmd.draftId() == null || cmd.draftId().isBlank()) {
+            return studioService.confirmScheme(cmd);
+        }
+        String cleanDraftId = requireDraftId(cmd.draftId());
+        String cleanIdemKey = (cmd.idempotencyKey() == null || cmd.idempotencyKey().isBlank())
+                ? null : cmd.idempotencyKey().trim();
+
+        return withDraftLock(cleanDraftId, () -> {
+            WorkbenchSchemeDraft stored = draftStore.find(cleanDraftId)
+                    .orElseThrow(() -> failure("NOT_FOUND", "关联工作台草案不存在: " + cleanDraftId, 404));
+
+            if (WorkbenchSchemeDraft.STATUS_DISCARDED.equals(stored.status())) {
+                throw failure("DRAFT_DISCARDED", "关联草案 " + cleanDraftId + " 已作废，不可再确认落库", 409);
+            }
+            if (WorkbenchSchemeDraft.STATUS_CONFIRMED.equals(stored.status())) {
+                if (isIdempotentConfirmedReplay(stored, cleanIdemKey)) {
+                    Map<String, Object> replay = new LinkedHashMap<>(studioService.confirmScheme(cmd));
+                    replay.put("draft", stored.withEvaluatedState(stored.status(), false, List.of()));
+                    return replay;
+                }
+                throw failure("DRAFT_ALREADY_CONFIRMED",
+                        "关联草案 " + cleanDraftId + " 已被确认绑定至方案 " + Objects.toString(stored.confirmedSchemeId(), ""),
+                        409);
+            }
+            Instant checkInstant = clock.instant();
+            if (WorkbenchSchemeDraft.STATUS_EXPIRED.equals(stored.status())
+                    || isExpired(stored.expiresAt(), checkInstant)) {
+                throw failure("DRAFT_EXPIRED", "关联草案 " + cleanDraftId + " 已过期，请重新试排后再确认落库", 409);
+            }
+
+            Map<String, Object> confirmedResult = studioService.confirmScheme(cmd);
+            String schemeId = extractConfirmedSchemeId(confirmedResult);
+            String operator = resolveOperator(null, actor);
+            String nowIso = clock.instant().toString();
+
+            // 沿用锁内预检时刻判定有效期，避免确认落库执行耗时跨越 expiresAt 造成“方案已落库但草案报过期”的账实撕裂
+            WorkbenchDraftStore.TransitionResult transition = draftStore.transitionFromPending(
+                    cleanDraftId,
+                    checkInstant.toEpochMilli(),
+                    current -> current.withConfirmed(schemeId, operator, nowIso)
+            );
+
+            WorkbenchSchemeDraft finalDraft;
+            if (transition.outcome() == WorkbenchDraftStore.TransitionOutcome.UPDATED) {
+                finalDraft = transition.draft();
+            } else if (transition.outcome() == WorkbenchDraftStore.TransitionOutcome.CONFLICT_STATE
+                    && transition.draft() != null
+                    && WorkbenchSchemeDraft.STATUS_CONFIRMED.equals(transition.draft().status())
+                    && Objects.equals(schemeId, transition.draft().confirmedSchemeId())) {
+                finalDraft = transition.draft();
+            } else {
+                log.error("草案 {} 联动方案 {} 落库后 CAS 回写异常: outcome={}", cleanDraftId, schemeId, transition.outcome());
+                finalDraft = unwrapTransitionOrThrow(cleanDraftId, transition);
+            }
+
+            Map<String, Object> out = new LinkedHashMap<>(confirmedResult);
+            out.put("draft", finalDraft);
+            return out;
+        });
+    }
+
+    private <T> T withDraftLock(String draftId, Supplier<T> action) {
+        DraftLockEntry entry = draftLocks.compute(draftId, (k, existing) -> {
+            DraftLockEntry target = existing == null ? new DraftLockEntry() : existing;
+            target.refs++;
+            return target;
+        });
+        entry.lock.lock();
+        try {
+            return action.get();
+        } finally {
+            entry.lock.unlock();
+            draftLocks.computeIfPresent(draftId, (k, existing) -> {
+                if (existing == entry) {
+                    existing.refs--;
+                    if (existing.refs <= 0) {
+                        return null;
+                    }
+                }
+                return existing;
+            });
+        }
+    }
+
+    private int tryWithDraftLock(String draftId, java.util.function.IntSupplier action) {
+        DraftLockEntry entry = draftLocks.compute(draftId, (k, existing) -> {
+            DraftLockEntry target = existing == null ? new DraftLockEntry() : existing;
+            target.refs++;
+            return target;
+        });
+        boolean acquired = false;
+        try {
+            // 若当前线程已持外层业务锁（如 confirmSchemeWithDraft 内钩子同步触发）或其它线程正持锁确认/作废，直接跳过本条
+            if (!entry.lock.isHeldByCurrentThread() && entry.lock.tryLock()) {
+                acquired = true;
+                return action.getAsInt();
+            }
+            return 0;
+        } finally {
+            if (acquired) {
+                entry.lock.unlock();
+            }
+            draftLocks.computeIfPresent(draftId, (k, existing) -> {
+                if (existing == entry) {
+                    existing.refs--;
+                    if (existing.refs <= 0) {
+                        return null;
+                    }
+                }
+                return existing;
+            });
+        }
+    }
+
+    /** Spring 定时滚动清理：按 draftId 粒度加锁将过期草案标态为 EXPIRED，并清除超过保留期的终态/过期条目。 */
+    @Scheduled(fixedDelayString = "${cutdemo.workbench.drafts.cleanup-interval-ms:300000}")
+    public void scheduledCleanupExpiredDrafts() {
+        try {
+            cleanupExpiredDrafts(retentionHours);
+        } catch (RuntimeException error) {
+            log.warn("定时清理过期工作台草案失败", error);
+        }
+    }
+
+    public int cleanupExpiredDrafts() {
+        return cleanupExpiredDrafts(retentionHours);
+    }
+
+    public int cleanupExpiredDrafts(long customRetentionHours) {
+        long safeHours = Math.max(0L, customRetentionHours);
+        long nowMs = clock.millis();
+        long purgeBeforeMs = nowMs - safeHours * 3_600_000L;
+        List<String> candidateIds = draftStore.listCleanupCandidateIds(nowMs, purgeBeforeMs);
+        int affected = 0;
+        for (String candidateId : candidateIds) {
+            affected += tryWithDraftLock(candidateId,
+                    () -> draftStore.expireOrPurgeSingle(candidateId, nowMs, purgeBeforeMs));
+        }
+        return affected;
+    }
+
+    private boolean isIdempotentConfirmedReplay(WorkbenchSchemeDraft stored, String idemKey) {
+        if (idemKey == null || stored.confirmedSchemeId() == null || stored.confirmedSchemeId().isBlank()) {
+            return false;
+        }
+        return Boolean.TRUE.equals(cuttingStatePort.inRead(tx ->
+                tx.findScheme(stored.confirmedSchemeId())
+                        .map(s -> idemKey.equals(s.idempotencyKey()))
+                        .orElse(false)
+        ));
+    }
+
+    private static String extractConfirmedSchemeId(Map<String, Object> result) {
+        if (result == null) return null;
+        Object schemeObj = result.get("scheme");
+        if (schemeObj instanceof SchedulingScheme scheme) {
+            return scheme.id();
+        }
+        if (schemeObj instanceof Map<?, ?> map && map.get("id") != null) {
+            return String.valueOf(map.get("id"));
+        }
+        return null;
+    }
+
+    private static WorkbenchSchemeDraft unwrapTransitionOrThrow(
+            String draftId,
+            WorkbenchDraftStore.TransitionResult result
+    ) {
+        return switch (result.outcome()) {
+            case UPDATED -> result.draft();
+            case NOT_FOUND -> throw failure("NOT_FOUND", "工作台草案不存在: " + draftId, 404);
+            case EXPIRED -> throw failure("DRAFT_EXPIRED", "草案 " + draftId + " 已过期，当前状态不允许该操作", 409);
+            case CONFLICT_STATE -> {
+                String st = result.draft() == null ? "UNKNOWN" : result.draft().status();
+                if (WorkbenchSchemeDraft.STATUS_CONFIRMED.equals(st)) {
+                    throw failure("DRAFT_ALREADY_CONFIRMED", "草案 " + draftId + " 已确认落库，不可重复操作", 409);
+                }
+                if (WorkbenchSchemeDraft.STATUS_DISCARDED.equals(st)) {
+                    throw failure("DRAFT_ALREADY_DISCARDED", "草案 " + draftId + " 已作废，不可再确认或重复作废", 409);
+                }
+                if (WorkbenchSchemeDraft.STATUS_EXPIRED.equals(st)) {
+                    throw failure("DRAFT_EXPIRED", "草案 " + draftId + " 已过期，当前状态不允许该操作", 409);
+                }
+                throw failure("DRAFT_CONFLICT", "草案 " + draftId + " 当前状态(" + st + ")不允许此状态跃迁", 409);
+            }
+        };
+    }
+
+    private static String requireDraftId(String draftId) {
+        if (draftId == null || draftId.isBlank()) {
+            throw failure("INVALID_INPUT", "草案编号 draftId 不能为空", 400);
+        }
+        return draftId.trim();
+    }
+
+    private static String resolveOperator(String explicit, String fallbackActor) {
+        if (explicit != null && !explicit.isBlank()) {
+            String clean = explicit.trim();
+            return clean.length() > 120 ? clean.substring(0, 120) : clean;
+        }
+        if (fallbackActor != null && !fallbackActor.isBlank()) {
+            String clean = fallbackActor.trim();
+            return clean.length() > 120 ? clean.substring(0, 120) : clean;
+        }
+        return "LOCAL";
     }
 
     private SnapshotCheck evaluateCreateChecks(

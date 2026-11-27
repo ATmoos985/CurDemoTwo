@@ -1,10 +1,20 @@
 export class ApiError extends Error {
     constructor(message, code, httpStatus = 0) {super(message);this.code=code;this.httpStatus=httpStatus;}
 }
-export async function requestJSON(url, body, headers = {}) {
+export async function requestJSON(url, body, headers = {}, options = {}) {
     let response;
-    try {response=await fetch(url,body===undefined?{cache:'no-store',headers}:{method:'POST',headers:{'Content-Type':'application/json',...headers},body:JSON.stringify(body)});}
-    catch {throw new ApiError('未收到服务器响应，请检查连接后重试。','NETWORK');}
+    try {
+        const init = body === undefined
+            ? { cache: 'no-store', headers }
+            : { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) };
+        if (options?.signal) {
+            init.signal = options.signal;
+        }
+        response = await fetch(url, init);
+    } catch (err) {
+        if (err?.name === 'AbortError') throw err;
+        throw new ApiError('未收到服务器响应，请检查连接后重试。', 'NETWORK');
+    }
     let result;
     try {result=await response.json();}
     catch {throw new ApiError('服务器未返回有效结果，请稍后重试。',response.status===401 || response.status===403?'AUTH':'INVALID_RESPONSE',response.status);}

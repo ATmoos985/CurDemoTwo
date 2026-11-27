@@ -238,7 +238,7 @@ export function audited(
         inputHash,
         status: 'SUCCEEDED',
         elapsedMs: Date.now() - started,
-        resultId: data?.id || data?.draftId || data?.resultId || data?.job?.id || null
+        resultId: data?.id || data?.draftId || data?.resultId || data?.batchGroupId || data?.job?.id || null
       });
       return {
         content: [{ type: 'text', text: JSON.stringify(data) }, ...extraContent],

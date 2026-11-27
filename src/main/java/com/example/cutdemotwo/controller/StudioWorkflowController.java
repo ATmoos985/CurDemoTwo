@@ -2,7 +2,10 @@ package com.example.cutdemotwo.controller;
 
 import com.example.cutdemotwo.business.cutting.SchedulingStudioService;
 import com.example.cutdemotwo.business.model.DemandTemplate;
+import com.example.cutdemotwo.business.workbench.WorkbenchDraftService;
+import com.example.cutdemotwo.config.AuthContext;
 import com.example.cutdemotwo.persistence.InventoryConflictException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -21,6 +24,7 @@ import java.util.Map;
 @RequestMapping("/api")
 public class StudioWorkflowController {
     private final SchedulingStudioService studioService;
+    private final WorkbenchDraftService draftService;
 
     @Value("${cutdemo.mes.auth-required:false}")
     private boolean mesAuthRequired = false;
@@ -29,7 +33,13 @@ public class StudioWorkflowController {
     private String mesToken = "";
 
     public StudioWorkflowController(SchedulingStudioService studioService) {
+        this(studioService, null);
+    }
+
+    @Autowired
+    public StudioWorkflowController(SchedulingStudioService studioService, WorkbenchDraftService draftService) {
         this.studioService = studioService;
+        this.draftService = draftService;
     }
 
     // 1. 需求模板库 (Demand Templates)
@@ -92,6 +102,12 @@ public class StudioWorkflowController {
 
     @PostMapping("/v2/schemes/confirm")
     public Map<String, Object> confirmScheme(@RequestBody SchedulingStudioService.ConfirmSchemeCommand cmd) {
+        if (cmd != null && cmd.draftId() != null && !cmd.draftId().isBlank()) {
+            if (draftService == null) {
+                throw new IllegalStateException("草案服务未配置，无法按 draftId 联动确认");
+            }
+            return draftService.confirmSchemeWithDraft(cmd, studioService, AuthContext.username());
+        }
         return studioService.confirmScheme(cmd);
     }
 

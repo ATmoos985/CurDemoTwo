@@ -30,6 +30,7 @@ import {
 } from './results/reconciliationUtils';
 import '../styles/theme-workbench-v2.css';
 import './workbench/multiMaterialWorkbench.css';
+import './workbench/draftInbox.css';
 
 import {
   DEFAULT_ENABLED_STRATEGIES,
@@ -47,6 +48,7 @@ import {
 import { projectWindowDefectsForBoard } from './workbench/defectWindowUtils';
 import {
   buildMultiMaterialCandidateRollOptions,
+  buildMultiMaterialWorkbenchRequest,
   exportMultiMaterialCsv,
   toBoardDefectsFromSchemeSnapshot
 } from './workbench/multiMaterialWorkbenchUtils';
@@ -58,6 +60,15 @@ import { WorkbenchCenterPanel } from './workbench/WorkbenchCenterPanel';
 import { WorkbenchRightPanel } from './workbench/WorkbenchRightPanel';
 import { DemandOverviewModal } from './workbench/DemandOverviewModal';
 import { ExternalPlanBanner } from './workbench/ExternalPlanBanner';
+import { DraftInboxDrawer } from './workbench/DraftInboxDrawer';
+import { DraftDiscardDialog } from './workbench/DraftDiscardDialog';
+import { useDraftInbox } from './workbench/useDraftInbox';
+import {
+  evaluateActiveDraftBlockedReason,
+  fetchWorkbenchDraft,
+  fetchWorkbenchDrafts,
+  type WorkbenchDraftDto
+} from './workbench/draftInboxApi';
 import {
   mapResultContextToWorkbenchPlan,
   type ExternalPlanBannerMeta,
@@ -388,7 +399,107 @@ export const CuttingWorkbenchPage: React.FC<{
   const [externalPlanError, setExternalPlanError] = useState<string | null>(null);
   const [externalPlanBanner, setExternalPlanBanner] = useState<ExternalPlanBannerMeta | null>(null);
   const [externalPlanDismissed, setExternalPlanDismissed] = useState<boolean>(false);
+  const [deeplinkNonce, setDeeplinkNonce] = useState<number>(0);
+  const [siblingDrafts, setSiblingDrafts] = useState<WorkbenchDraftDto[]>([]);
+  const [draftClockTick, setDraftClockTick] = useState<number>(0);
   const deeplinkLoadedKeyRef = useRef<string>('');
+
+  const syncExternalPlanBannerWithDraft = React.useCallback((updated: WorkbenchDraftDto) => {
+    const updatedId = updated.draftId || updated.id;
+    const upperStatus = String(updated.status || '').toUpperCase();
+    const expMs = updated.expiresAt ? Date.parse(updated.expiresAt) : NaN;
+    const isExpiredNow =
+      upperStatus === 'EXPIRED' ||
+      (upperStatus === 'PENDING_CONFIRMATION' && Number.isFinite(expMs) && expMs < Date.now());
+    const nextStatus = isExpiredNow && upperStatus === 'PENDING_CONFIRMATION' ? 'EXPIRED' : updated.status;
+    setExternalPlanBanner((prev) => {
+      if (!prev || prev.draftId !== updatedId) return prev;
+      if (
+        prev.status === nextStatus &&
+        prev.expired === isExpiredNow &&
+        prev.stale === Boolean(updated.stale) &&
+        (prev.confirmedSchemeId || null) === (updated.confirmedSchemeId || null) &&
+        (prev.discardReason || null) === (updated.discardReason || null) &&
+        (prev.expiresAt || null) === (updated.expiresAt || null)
+      ) {
+        return prev;
+      }
+      return {
+        ...prev,
+        status: nextStatus,
+        expired: isExpiredNow,
+        stale: Boolean(updated.stale),
+        staleReasons: Array.isArray(updated.staleReasons) ? updated.staleReasons : prev.staleReasons,
+        confirmedSchemeId: updated.confirmedSchemeId ?? prev.confirmedSchemeId,
+        discardReason: updated.discardReason ?? prev.discardReason,
+        expiresAt: updated.expiresAt ?? prev.expiresAt
+      };
+    });
+  }, []);
+
+  const draftInbox = useDraftInbox({
+    activeDraftId: externalPlanBanner?.draftId || draftId || null,
+    onForceReloadDeeplink: () => setDeeplinkNonce((n) => n + 1),
+    onDraftStateChanged: (updated) => {
+      const updatedId = updated.draftId || updated.id;
+      syncExternalPlanBannerWithDraft(updated);
+      if (externalPlanBanner?.draftId === updatedId) {
+        setDeeplinkNonce((n) => n + 1);
+      }
+    },
+    onActiveDraftSynced: syncExternalPlanBannerWithDraft
+  });
+
+  // 实时监测当前活动草案的 expiresAt 到期时间，到期瞬间自动切换横幅与确认按钮阻断状态
+  useEffect(() => {
+    if (!externalPlanBanner || externalPlanBanner.status !== 'PENDING_CONFIRMATION' || externalPlanBanner.expired) {
+      return;
+    }
+    if (!externalPlanBanner.expiresAt) return;
+    const expMs = Date.parse(externalPlanBanner.expiresAt);
+    if (!Number.isFinite(expMs)) return;
+    const delayMs = expMs - Date.now() + 100;
+    if (delayMs <= 0) {
+      setExternalPlanBanner((prev) =>
+        prev && prev.draftId === externalPlanBanner.draftId && prev.status === 'PENDING_CONFIRMATION'
+          ? { ...prev, status: 'EXPIRED', expired: true }
+          : prev
+      );
+      setDraftClockTick(Date.now());
+      return;
+    }
+    if (delayMs > 86_400_000) return;
+    const timer = window.setTimeout(() => {
+      setExternalPlanBanner((prev) =>
+        prev && prev.draftId === externalPlanBanner.draftId && prev.status === 'PENDING_CONFIRMATION'
+          ? { ...prev, status: 'EXPIRED', expired: true }
+          : prev
+      );
+      setDraftClockTick(Date.now());
+    }, delayMs);
+    return () => window.clearTimeout(timer);
+  }, [externalPlanBanner]);
+
+  useEffect(() => {
+    const groupId = externalPlanBanner?.batchGroupId;
+    if (!groupId) {
+      setSiblingDrafts([]);
+      return;
+    }
+    let cancelled = false;
+    fetchWorkbenchDrafts({ status: 'ALL', batchGroupId: groupId, page: 0, size: 50 })
+      .then((res) => {
+        if (!cancelled) {
+          setSiblingDrafts(res.items || []);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setSiblingDrafts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [externalPlanBanner?.batchGroupId, externalPlanBanner?.status, deeplinkNonce]);
 
   useEffect(() => {
     setShowPath(settings.showPath);
@@ -459,7 +570,7 @@ export const CuttingWorkbenchPage: React.FC<{
     const cleanTaskId = (taskId || '').trim();
     const cleanResultId = (resultId || '').trim();
     const cleanDraftId = (draftId || '').trim();
-    const deeplinkKey = `${cleanTaskId}|${cleanResultId}|${cleanDraftId}`;
+    const deeplinkKey = `${cleanTaskId}|${cleanResultId}|${cleanDraftId}|${deeplinkNonce}`;
 
     if (!cleanTaskId && !cleanResultId && !cleanDraftId) {
       deeplinkLoadedKeyRef.current = '';
@@ -641,7 +752,7 @@ export const CuttingWorkbenchPage: React.FC<{
         deeplinkLoadedKeyRef.current = '';
       }
     };
-  }, [taskId, resultId, draftId]);
+  }, [taskId, resultId, draftId, deeplinkNonce]);
 
   useEffect(() => {
     const curTaskId = activeDimension === '2D' ? loadedTaskId : slitLoadedTaskId;
@@ -1266,7 +1377,30 @@ export const CuttingWorkbenchPage: React.FC<{
     batchGuardWarning,
     reloadReferenceData,
     syncDemandFamilyProgress,
-    syncMergedDemandFamiliesProgress
+    syncMergedDemandFamiliesProgress,
+    onDraftConfirmed: (confirmedDraftId, schemeId) => {
+      draftInbox.refreshDraftInbox({ silent: true }).catch(() => {});
+      setExternalPlanBanner((prev) =>
+        prev && prev.draftId === confirmedDraftId
+          ? {
+              ...prev,
+              status: 'CONFIRMED',
+              confirmedSchemeId: schemeId,
+              expired: false,
+              stale: false,
+              staleReasons: []
+            }
+          : prev
+      );
+    },
+    onDraftConfirmFailed: (failedDraftId) => {
+      draftInbox.refreshDraftInbox({ silent: true }).catch(() => {});
+      fetchWorkbenchDraft(failedDraftId)
+        .then((latest) => {
+          syncExternalPlanBannerWithDraft(latest);
+        })
+        .catch(() => {});
+    }
   });
 
   // 确认方案落库后清除当前任务草稿，防止后续误提示恢复旧草稿
@@ -1480,6 +1614,61 @@ export const CuttingWorkbenchPage: React.FC<{
     ]
   );
 
+  const activeSchemeDraftId = is2D ? activeScheme2D?.draftId : activeScheme1D?.draftId;
+  const activeSchemeConfirmedId = is2D
+    ? activeScheme2D?.confirmedSchemeId
+    : activeScheme1D?.confirmedSchemeId;
+
+  // 若从本机草稿恢复的方案仍携带 draftId 且尚无对应外部草案横幅，自动同步一次实时草案状态以防越过过期/作废阻断
+  useEffect(() => {
+    if (!activeSchemeDraftId || activeSchemeConfirmedId || externalPlanLoading) return;
+    if (externalPlanBanner && externalPlanBanner.draftId === activeSchemeDraftId) return;
+    let cancelled = false;
+    fetchWorkbenchDraft(activeSchemeDraftId)
+      .then((latest) => {
+        if (cancelled) return;
+        const mapped = mapResultContextToWorkbenchPlan(null, latest as WorkbenchSchemeDraftDto, null);
+        setExternalPlanBanner(mapped.banner);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSchemeDraftId, activeSchemeConfirmedId, externalPlanLoading, externalPlanBanner?.draftId]);
+
+  const activeDraftBlockedReason = useMemo(() => {
+    return evaluateActiveDraftBlockedReason({
+      draftId: activeSchemeDraftId,
+      confirmedSchemeId: activeSchemeConfirmedId,
+      banner: externalPlanBanner,
+      nowMs: Date.now()
+    });
+  }, [activeSchemeDraftId, activeSchemeConfirmedId, externalPlanBanner, draftClockTick]);
+
+  const handleGenerateMultiMaterialDrafts = () => {
+    const reqRes = buildMultiMaterialWorkbenchRequest({
+      demands: activeDemands2D,
+      taskId: loadedTaskId,
+      materialModel: materialModel2D,
+      requiredBatchNo: activePoolFamily?.requiredBatchNo || null,
+      requiredColor: activePoolFamily?.requiredColor || null,
+      preferRemnants: multiPreferRemnants,
+      maxRemnants: multiMaxRemnants,
+      candidateRollIds: multiCandidateRollIds,
+      pieceGapMm,
+      trimStartMm
+    });
+    if ('error' in reqRes) {
+      toast(reqRes.error, true);
+      return;
+    }
+    draftInbox.triggerMultiMaterialDraftBatch({
+      ...reqRes.payload,
+      continueAcrossRolls: true,
+      ttlSeconds: 1800
+    });
+  };
+
   const activeHighlightKey = hoveredDemandKey || pinnedDemandKey;
 
   const splitCls = [
@@ -1504,6 +1693,8 @@ export const CuttingWorkbenchPage: React.FC<{
         rightCollapsed={rightCollapsed}
         onToggleLeftPane={() => setLeftCollapsed((v) => !v)}
         onToggleRightPane={() => setRightCollapsed((v) => !v)}
+        pendingDraftCount={draftInbox.pendingCount}
+        onOpenDraftInbox={draftInbox.openDrawer}
         canvasMode={canvasMode}
         scenario2D={scenario2D}
         multiWidthsText2D={multiWidthsText2D}
@@ -1555,6 +1746,31 @@ export const CuttingWorkbenchPage: React.FC<{
                 : null
               : null
           }
+          siblingDrafts={siblingDrafts}
+          onSelectDraft={draftInbox.previewDraft}
+          onDiscardDraft={(targetDraftId) => {
+            const matched =
+              siblingDrafts.find((d) => (d.draftId || d.id) === targetDraftId) ||
+              draftInbox.drafts.find((d) => (d.draftId || d.id) === targetDraftId);
+            if (matched) {
+              draftInbox.openDiscardDialog(matched);
+            } else if (externalPlanBanner) {
+              draftInbox.openDiscardDialog({
+                id: targetDraftId,
+                draftId: targetDraftId,
+                status: externalPlanBanner.status,
+                issuedAt: '',
+                expiresAt: externalPlanBanner.expiresAt || '',
+                stale: externalPlanBanner.stale,
+                staleReasons: externalPlanBanner.staleReasons,
+                target: {
+                  resultId: externalPlanBanner.resultId,
+                  taskId: externalPlanBanner.taskId
+                },
+                riskChecks: externalPlanBanner.riskChecks
+              });
+            }
+          }}
           onDismiss={() => {
             setExternalPlanDismissed(true);
             setExternalPlanError(null);
@@ -1886,6 +2102,9 @@ export const CuttingWorkbenchPage: React.FC<{
             onExportMultiMaterialCsv={() =>
               exportMultiMaterialCsv(multiMaterialSummary?.rawResponse)
             }
+            onGenerateMultiMaterialDrafts={handleGenerateMultiMaterialDrafts}
+            generatingMultiMaterialDrafts={draftInbox.generatingBatch}
+            activeDraftBlockedReason={activeDraftBlockedReason}
             onStopSolve={handleStopSolve}
             onRunSolve2D={handleRunSolve2D}
             onRunSolve1D={handleRunSolve1D}
@@ -1974,6 +2193,33 @@ export const CuttingWorkbenchPage: React.FC<{
         updateSlitOrder={updateSlitOrder}
         removeSlitOrder={removeSlitOrder}
         addSlitOrder={addSlitOrder}
+      />
+
+      <DraftInboxDrawer
+        open={draftInbox.drawerOpen}
+        drafts={draftInbox.drafts}
+        total={draftInbox.total}
+        pendingCount={draftInbox.pendingCount}
+        statusFilter={draftInbox.statusFilter}
+        batchGroupFilter={draftInbox.batchGroupFilter}
+        activeDraftId={draftInbox.activeDraftId}
+        loading={draftInbox.loading}
+        loadingMore={draftInbox.loadingMore}
+        error={draftInbox.error}
+        onClose={draftInbox.closeDrawer}
+        onRefresh={() => draftInbox.refreshDraftInbox()}
+        onLoadMore={draftInbox.loadMoreDrafts}
+        onChangeStatusFilter={draftInbox.changeStatusFilter}
+        onClearBatchGroupFilter={draftInbox.clearBatchGroupFilter}
+        onPreviewDraft={draftInbox.previewDraft}
+        onDiscardDraft={draftInbox.openDiscardDialog}
+      />
+
+      <DraftDiscardDialog
+        draft={draftInbox.discardTarget}
+        submitting={draftInbox.discardSubmitting}
+        onClose={draftInbox.closeDiscardDialog}
+        onConfirmDiscard={draftInbox.submitDiscard}
       />
     </div>
   );

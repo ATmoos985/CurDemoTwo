@@ -3,20 +3,26 @@ routes:
   - workbench
 ---
 
-# 工作台编排求解、22 工具工业 MCP 与深链预览闭环
+# 工作台编排求解、25 工具工业 MCP、草案收件箱与深链闭环
 
-验证阶段一（`542fa5c..c6c5a94`）新增的外部 Harness 协同闭环：后端 `/api/v2/workbench/**` 5 端点无环编排求解、同口径双方案比较与持久化待确认草案（File `.drafts/` 与 MySQL V11）→ `integrations/mcp` 22 工具四开关权限隔离、零依赖 PNG 蓝图预览与显式故障回报 → 浏览器打开 `#/workbench?taskId=...&resultId=...` / `&draftId=...` 深链直接在四层 Konva 画布核对方案与版本漂移告警（预览零写库，最终由人工点击「选定此方案」确认落库）。
+验证阶段一（`542fa5c..c6c5a94`）与路线 A 阶段二新增的外部 Harness 协同与工作台闭环：后端 `/api/v2/workbench/**` 9 端点无环编排求解、多母卷连续接力批量草案、草案列表/确认/作废与滚动清理（File `.drafts/` 与 MySQL V12）→ `integrations/mcp` 25 工具四开关权限隔离、零依赖 PNG 蓝图预览与显式故障回报 → 浏览器打开 `#/workbench?taskId=...&resultId=...` / `&draftId=...` 深链或在工作台「待审草案」收件箱抽屉按批组浏览、预览、作废与「选定此方案」联动确认落库。
 
 ## Sub-features
 
 - `WB-01`：`POST /api/v2/workbench/tasks/{taskId}/plan-jobs` 按任务待排余量自动装配 2D（矩形直刀外扩/异形带孔）或 1D 求解作业，严格 `422 MATERIAL_NOT_READY` 拦截未放行 `PENDING` 卷、报废卷或不可用料头。
 - `WB-02`：`GET /api/v2/workbench/tasks/{taskId}/result-comparison` 返回逐规格应排/已排/缺件与同口径物理占长对比，条件不同或未双齐套时抑制节省量。
 - `WB-03`：`POST/GET /api/v2/workbench/drafts` 持久化待人工确认草案（`status="PENDING_CONFIRMATION"`、`requiresHumanConfirmation=true`、`inventoryMutated=false`），支持 TTL `EXPIRED` 与库存/任务 revision 漂移 `stale=true` 动态探测，且不写入或扣减实物库存。
-- `MCP-01`：`integrations/mcp` 22 工具严格按 4 个宿主环境变量开关（`COMPUTE`/`BUSINESS_READ`/`ALLOW_DRAFT_SCHEME`/`ALLOW_DEMAND_WRITE`）隔离，无静默吞错（显式返回 `partialErrors`/`degraded`），并暴露 2 份 Resource（含 `cutting://guides/operations`）与 3 个标准 Prompts。
-- `MCP-02`：零依赖纯 JS PNG 渲染器（`preview-png.mjs`）随 `plan_task_on_material` 与 `render_cutting_preview` 返回合法 `image/png` 排料缩略图与工作台直达深链 `workbenchUrl`。
+- `WB-04`：草案阶段二闭环与定时清理：`GET /api/v2/workbench/drafts` 倒序分页过滤（含全局 `pendingCount`）、`POST /api/v2/workbench/drafts/{draftId}/confirm` & `/discard` 原子 CAS 跃迁（非待确认/过期返回 `409`）、`POST /api/v2/schemes/confirm` 传 `draftId` 联动回写 `CONFIRMED` 及 `@Scheduled` 滚动过期标态与物理清理。
+- `WB-05`：多料头接力 + 多母卷连续接力批量草案：`POST /api/v2/planning/multi-material`（`continueAcrossRolls=true` 跳过去重并跨卷连续接力）与 `POST /api/v2/workbench/multi-material-drafts` 经 `OptimizationService` 同步归档生成 `resultId` 及共享 `batchGroupId` 草案组，零锁扣实物库存。
+- `MCP-01`：`integrations/mcp` 25 工具严格按 4 个宿主环境变量开关（`COMPUTE`/`BUSINESS_READ`/`ALLOW_DRAFT_SCHEME`/`ALLOW_DEMAND_WRITE`）隔离，无静默吞错（显式返回 `partialErrors`/`degraded`），并暴露 2 份 Resource（含 `cutting://guides/operations`）与 3 个标准 Prompts。
+- `MCP-02`：零依赖纯 JS PNG 渲染器（`preview-png.mjs`）随 `plan_task_on_material`、`plan_multi_material_drafts` 与 `render_cutting_preview` 返回合法 `image/png` 排料缩略图与工作台直达深链 `workbenchUrl`。
+- `MCP-03`：阶段二草案协同 3 工具：`list_draft_schemes`（`BUSINESS_READ`）、`discard_draft_scheme`（`ALLOW_DRAFT_SCHEME`，透传 409 冲突且审计日志不落盘原因明文）、`plan_multi_material_drafts`（`COMPUTE+BUSINESS_READ+ALLOW_DRAFT_SCHEME`，并发渲染前 N 份 PNG 预览）。
 - `DEEP-01`：打开 `#/workbench?taskId=...&resultId=...` 渲染 `[data-testid="external-plan-banner"]`（「外部试排方案预览（尚未锁库）」）与四层 Konva 蓝图，零写库请求。
-- `DEEP-02`：打开 `#/workbench?taskId=...&draftId=...` 展示持久化草案号、有效期与风险预检列表。
-- `DEEP-03`：关联任务或库存版本变更后重新打开草案深链，触发 `[data-testid="external-plan-stale-alert"]` 醒目版本漂移告警条。
+- `DEEP-02`：打开 `#/workbench?taskId=...&draftId=...` 展示持久化草案号、有效期、同批组切换条（`[data-testid="banner-sibling-*"]`）与风险预检列表。
+- `DEEP-03`：关联任务或库存版本变更后重新打开草案深链，触发 `[data-testid="external-plan-stale-alert"]` 醒目版本漂移告警条；已作废草案展示 `[data-testid="external-plan-discarded-alert"]` 并禁用「选定此方案」。
+- `INBOX-01`：工作台顶栏「待审草案」计数微标按钮（`[data-testid="draft-inbox-trigger"]`）打开滑出抽屉（`[data-testid="draft-inbox-drawer"]`），支持状态过滤、批组聚合与一键跳转工作台画布预览。
+- `INBOX-02`：抽屉与顶部横幅支持打开原生 `<dialog>` 作废弹窗（`DraftDiscardDialog`），必填/快捷选择 `discardReason` 后原子作废且零扣库存。
+- `INBOX-03`：工作台「多料联排」总览卡提供「生成联排草案组」次级按钮（`[data-testid="generate-multi-drafts-btn"]`）触发跨卷接力批量草案并在预览后通过「选定此方案」携带 `draftId` 自动闭环回写 `CONFIRMED`。
 
 ## How to get to it (user POV)
 
@@ -39,5 +45,5 @@ Preconditions: 已通过 `verify-ctl.mjs launch` 启动非 `8080` 免登隔离�
 ## Gotchas
 
 - `verify-ctl.mjs launch` 已显式隔离 `--cutdemo.workbench.drafts.path` 至临时目录，并在 `doctor` / `cleanup` 同步校验正式 `data/cutdemo-state.json.drafts` 零污染。
-- 企业认证模式（`--auth`）下，`/api/v2/workbench/**` 的 2 个 `POST` 写端点仅允许 `ADMIN`/`PLANNER`（`OPERATOR`/`WAREHOUSE`/`INSPECTOR` 返回 `403`），3 个 `GET` 只读端点放行全部 5 角色。
+- 企业认证模式（`--auth`）下，`/api/v2/workbench/**` 的全部写端点（含 `POST /drafts/{draftId}/confirm`、`/discard`、`/multi-material-drafts`）仅允许 `ADMIN`/`PLANNER`（`OPERATOR`/`WAREHOUSE`/`INSPECTOR` 返回 `403`），4 个 `GET` 只读端点（含 `GET /drafts`）放行全部 5 角色。
 - `mcp-live-smoke` 会创建一个隔离测试需求任务（仅写待排池，不扣实物母卷/料头），建议在 `ui-preview` 之后或独立隔离实例上运行。

@@ -180,8 +180,26 @@ public class SchedulingStudioService {
             List<DemandLineInput> demands,
             SchedulingScheme.Layout2DPayload layout2D,
             SchedulingScheme.Slitting1DPayload slitting1D,
-            List<SchedulingScheme.TaskDemandAllocation> sourceAllocations
+            List<SchedulingScheme.TaskDemandAllocation> sourceAllocations,
+            String draftId
     ) {
+        public ConfirmSchemeCommand(
+                String idempotencyKey, String title, String dimension, String scenarioId,
+                String strategyId, String strategyName, String taskId, String taskName,
+                String externalOrderNo, String materialMode, String rollId, String remnantId,
+                String materialModel, double widthMm, double canvasLengthMm, Double windowStartY,
+                double occupiedLengthMm, double trimStartMm, double pieceGapMm,
+                double utilizationPct, double pieceAreaM2, Boolean avoidDefects,
+                List<DemandLineInput> demands, SchedulingScheme.Layout2DPayload layout2D,
+                SchedulingScheme.Slitting1DPayload slitting1D,
+                List<SchedulingScheme.TaskDemandAllocation> sourceAllocations
+        ) {
+            this(idempotencyKey, title, dimension, scenarioId, strategyId, strategyName, taskId, taskName,
+                    externalOrderNo, materialMode, rollId, remnantId, materialModel, widthMm, canvasLengthMm,
+                    windowStartY, occupiedLengthMm, trimStartMm, pieceGapMm, utilizationPct, pieceAreaM2,
+                    avoidDefects, demands, layout2D, slitting1D, sourceAllocations, null);
+        }
+
         public ConfirmSchemeCommand(
                 String idempotencyKey, String title, String dimension, String scenarioId,
                 String strategyId, String strategyName, String taskId, String taskName,
@@ -195,7 +213,7 @@ public class SchedulingStudioService {
             this(idempotencyKey, title, dimension, scenarioId, strategyId, strategyName, taskId, taskName,
                     externalOrderNo, materialMode, rollId, remnantId, materialModel, widthMm, canvasLengthMm,
                     windowStartY, occupiedLengthMm, trimStartMm, pieceGapMm, utilizationPct, pieceAreaM2,
-                    avoidDefects, demands, layout2D, slitting1D, null);
+                    avoidDefects, demands, layout2D, slitting1D, null, null);
         }
     }
 

@@ -2,6 +2,7 @@ package com.example.cutdemotwo.controller;
 
 import com.example.cutdemotwo.config.AuthSecurityFilter;
 import com.example.cutdemotwo.config.TraceIdFilter;
+import com.example.cutdemotwo.contracts.jobs.OptimizationFailure;
 import com.example.cutdemotwo.persistence.InventoryConflictException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,6 +39,17 @@ public class GlobalApiExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalApiExceptionHandler.class);
 
     public record ApiError(String code, String message, String traceId, boolean retryable) {}
+
+    @ExceptionHandler(OptimizationFailure.class)
+    public ResponseEntity<ApiError> handleOptimizationFailure(OptimizationFailure error) {
+        String code = hasText(error.code) ? error.code : mapStatusCode(error.status);
+        String message = hasText(error.getMessage()) ? error.getMessage() : defaultMessageForStatus(error.status);
+        var builder = ResponseEntity.status(error.status);
+        if (error.retryable) {
+            builder.header("Retry-After", "1");
+        }
+        return builder.body(new ApiError(code, message, currentTraceId(), error.retryable));
+    }
 
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<ApiError> handleResponseStatus(ResponseStatusException error) {

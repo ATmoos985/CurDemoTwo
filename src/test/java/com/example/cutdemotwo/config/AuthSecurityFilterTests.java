@@ -241,8 +241,12 @@ class AuthSecurityFilterTests {
         assertEquals(200, invoke(filter, "POST", "/api/v2/planning/cut-plan", adminToken).getStatus());
         assertEquals(200, invoke(filter, "POST", "/api/v2/workbench/tasks/T-1/plan-jobs", adminToken).getStatus());
         assertEquals(200, invoke(filter, "POST", "/api/v2/workbench/drafts", adminToken).getStatus());
+        assertEquals(200, invoke(filter, "POST", "/api/v2/workbench/drafts/DFT-1/confirm", plannerToken).getStatus());
+        assertEquals(200, invoke(filter, "POST", "/api/v2/workbench/drafts/DFT-1/discard", plannerToken).getStatus());
+        assertEquals(200, invoke(filter, "POST", "/api/v2/workbench/multi-material-drafts", plannerToken).getStatus());
         assertEquals(200, invoke(filter, "POST", "/api/v2/workbench/tasks/T-1/plan-jobs", plannerToken).getStatus());
         assertEquals(200, invoke(filter, "POST", "/api/v2/workbench/drafts", plannerToken).getStatus());
+        assertEquals(200, invoke(filter, "GET", "/api/v2/workbench/drafts", operatorToken).getStatus());
         assertEquals(200, invoke(filter, "GET", "/api/v2/workbench/drafts/DFT-1", operatorToken).getStatus());
         assertEquals(200, invoke(filter, "GET", "/api/v2/workbench/results/RES-1/context", operatorToken).getStatus());
         assertEquals(200, invoke(filter, "GET", "/api/v2/analytics/cost-summary", operatorToken).getStatus());
@@ -252,6 +256,9 @@ class AuthSecurityFilterTests {
         assertEquals(403, invoke(filter, "POST", "/api/v2/workbench/tasks/T-1/plan-jobs", operatorToken).getStatus());
         assertEquals(403, invoke(filter, "POST", "/api/v2/workbench/drafts", warehouseToken).getStatus());
         assertEquals(403, invoke(filter, "POST", "/api/v2/workbench/drafts", inspectorToken).getStatus());
+        assertEquals(403, invoke(filter, "POST", "/api/v2/workbench/drafts/DFT-1/discard", operatorToken).getStatus());
+        assertEquals(403, invoke(filter, "POST", "/api/v2/workbench/drafts/DFT-1/confirm", warehouseToken).getStatus());
+        assertEquals(403, invoke(filter, "POST", "/api/v2/workbench/multi-material-drafts", inspectorToken).getStatus());
 
         // 下游抛异常时也必须写入并在 finally 清理 AuthContext
         var req = new MockHttpServletRequest("POST", "/api/v2/schemes/confirm");

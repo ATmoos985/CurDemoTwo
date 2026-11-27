@@ -121,6 +121,15 @@ export interface WorkbenchSchemeDraftDto {
   riskChecks?: WorkbenchRiskCheckDto[] | null;
   workbenchUrl?: string | null;
   nextStep?: string | null;
+  batchGroupId?: string | null;
+  batchIndex?: number | null;
+  batchTotal?: number | null;
+  confirmedSchemeId?: string | null;
+  confirmedBy?: string | null;
+  confirmedAt?: string | null;
+  discardedBy?: string | null;
+  discardedAt?: string | null;
+  discardReason?: string | null;
 }
 
 export interface ExternalPlanRiskCheck {
@@ -147,6 +156,13 @@ export interface ExternalPlanBannerMeta {
   fulfillmentLabel: string;
   expiresAt: string | null;
   nextStep: string | null;
+  batchGroupId: string | null;
+  batchIndex: number | null;
+  batchTotal: number | null;
+  confirmedSchemeId: string | null;
+  confirmedAt: string | null;
+  discardedAt: string | null;
+  discardReason: string | null;
 }
 
 export interface WorkbenchSlitSpecPatch {
@@ -511,17 +527,22 @@ function buildBannerMeta(params: {
   } = params;
   const draftId = cleanText(draft?.draftId || draft?.id) || null;
   const rawDraftStatus = cleanText(draft?.status).toUpperCase();
+  const isFinalized = rawDraftStatus === 'CONFIRMED' || rawDraftStatus === 'DISCARDED';
   const expiresAt = cleanText(draft?.expiresAt) || null;
   const parsedExpireMs = expiresAt ? Date.parse(expiresAt) : Number.NaN;
-  const expiredByClock = Number.isFinite(parsedExpireMs) && parsedExpireMs < nowMs;
-  const expired = rawDraftStatus === 'EXPIRED' || expiredByClock;
-  const stale = Boolean(draft?.stale);
-  const staleReasons = Array.isArray(draft?.staleReasons)
+  const expiredByClock = !isFinalized && Number.isFinite(parsedExpireMs) && parsedExpireMs < nowMs;
+  const expired = !isFinalized && (rawDraftStatus === 'EXPIRED' || expiredByClock);
+  const stale = isFinalized ? false : Boolean(draft?.stale);
+  const staleReasons = isFinalized
+    ? []
+    : Array.isArray(draft?.staleReasons)
     ? draft.staleReasons.map((s) => cleanText(s)).filter(Boolean)
     : [];
   const riskChecks = normalizeRiskChecks(draft);
   const failedRiskChecks = riskChecks.filter((c) => !c.passed);
-  const status = expired
+  const status = isFinalized
+    ? rawDraftStatus
+    : expired
     ? 'EXPIRED'
     : rawDraftStatus || (jobState ? jobState.toUpperCase() : 'PREVIEW');
   const normFulfillment = cleanText(fulfillmentStatus).toUpperCase() || 'UNKNOWN';
@@ -543,7 +564,14 @@ function buildBannerMeta(params: {
     fulfillmentStatus: normFulfillment,
     fulfillmentLabel: buildFulfillmentLabel(normFulfillment),
     expiresAt,
-    nextStep: cleanText(draft?.nextStep) || null
+    nextStep: cleanText(draft?.nextStep) || null,
+    batchGroupId: cleanText(draft?.batchGroupId) || null,
+    batchIndex: typeof draft?.batchIndex === 'number' ? draft.batchIndex : null,
+    batchTotal: typeof draft?.batchTotal === 'number' ? draft.batchTotal : null,
+    confirmedSchemeId: cleanText(draft?.confirmedSchemeId) || null,
+    confirmedAt: cleanText(draft?.confirmedAt) || null,
+    discardedAt: cleanText(draft?.discardedAt) || null,
+    discardReason: cleanText(draft?.discardReason) || null
   };
 }
 
@@ -824,7 +852,10 @@ export function mapResultContextToWorkbenchPlan(
           overproduced: Math.max(0, Math.floor(Number(f.overproduced) || 0))
         };
       }),
-      rawResult
+      rawResult,
+      ...(draftId ? { draftId } : {}),
+      ...(cleanText(draft?.batchGroupId) ? { draftBatchGroupId: cleanText(draft?.batchGroupId) } : {}),
+      ...(cleanText(draft?.confirmedSchemeId) ? { confirmedSchemeId: cleanText(draft?.confirmedSchemeId) } : {})
     };
 
     const slitMinW = positiveNum(problem.minWidthMm, 0);
@@ -1169,7 +1200,10 @@ export function mapResultContextToWorkbenchPlan(
     result: finalResult,
     ...(defects ? { defects } : {}),
     ...(cleanText(source?.batchNo) ? { batchNo: cleanText(source?.batchNo) } : {}),
-    ...(cleanText(source?.color) ? { color: cleanText(source?.color) } : {})
+    ...(cleanText(source?.color) ? { color: cleanText(source?.color) } : {}),
+    ...(draftId ? { draftId } : {}),
+    ...(cleanText(draft?.batchGroupId) ? { draftBatchGroupId: cleanText(draft?.batchGroupId) } : {}),
+    ...(cleanText(draft?.confirmedSchemeId) ? { confirmedSchemeId: cleanText(draft?.confirmedSchemeId) } : {})
   };
 
   const canvasPatch2D: CanvasSpecPatch = {

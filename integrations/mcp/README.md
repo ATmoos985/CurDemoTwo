@@ -1,4 +1,4 @@
-# 搭切排产 MCP 适配器 v1（22 工具 + 零依赖 PNG 预览 + 全本机 Harness 适配）
+# 搭切排产 MCP 适配器 v2（25 工具 + 零依赖 PNG 预览 + 全本机 Harness 适配）
 
 统一面向 **Codex / Claude Desktop / Cursor / Pi** 等所有标准 MCP Harness，支持本机 `stdio` 与可选受保护 `Streamable HTTP` 两种传输模式。全部业务与算法调用均走仓库标准 REST API，**绝不直接锁库、报工或扣减实物库存**；试排结果与持久化草案均附带前端工作台深链 URL（`workbenchUrl`）与零依赖高对比工业风 PNG 蓝图预览，交由授权计划员人工核对后点击「选定此方案」落库。
 
@@ -22,8 +22,8 @@ npm test --prefix integrations/mcp
 - **严格回环地址校验**：`CUTTING_API_URL` 仅接受字面量回环地址 `http(s)://127.0.0.1[:port]` 或 `http(s)://[::1][:port]`，拒绝域名、路径、凭据、查询串与重定向。
 - **宿主隔离开关**：以下 4 个环境变量仅接受 `'true'` / `'false'`（默认全 `false`），由宿主环境控制，模型无法通过工具参数自授权：
   - `CUTTING_MCP_COMPUTE`：开放纯计算排料作业提交/取消（与业务只读同时开启时开放一键编排试排 `plan_task_on_material`）
-  - `CUTTING_MCP_BUSINESS_READ`：开放需求池、库存全景、模板库、分床纯计算、母卷追踪、运营归因与同口径对比
-  - `CUTTING_MCP_ALLOW_DRAFT_SCHEME`：开放后端持久化待审批草案 `save_draft_scheme`（不写库存）
+  - `CUTTING_MCP_BUSINESS_READ`：开放需求池、库存全景、模板库、分床纯计算、母卷追踪、运营归因、同口径对比及草案列表查询 `list_draft_schemes`
+  - `CUTTING_MCP_ALLOW_DRAFT_SCHEME`：开放后端持久化待审批草案 `save_draft_scheme`、草案作废 `discard_draft_scheme`（不写库存）；与 `COMPUTE`、`BUSINESS_READ` 同时开启时开放多料连续接力批量草案编排 `plan_multi_material_drafts`
   - `CUTTING_MCP_ALLOW_DEMAND_WRITE`：开放需求池建单/合并 `create_demand_task`（仅写待排需求池，不扣实物库存）
 - **脱敏审计日志**：每次工具调用向 `stderr`（以及可选 `MCP_AUDIT_LOG_PATH` JSONL）写入白名单摘要（`timestamp` / `traceId` / `tool` / `inputHash` / `status` / `code` / `elapsedMs` / `resultId` / `transport`），绝不落盘原始多边形顶点、客户订单备注、PNG 图像数据或访问令牌。
 
@@ -129,7 +129,7 @@ node integrations/mcp/src/index.mjs
 
 ---
 
-## 全部 22 个工具总表
+## 全部 25 个工具总表
 
 | # | 工具名称 | 开放开关 | 行为与安全边界 |
 | --- | --- | --- | --- |
@@ -155,6 +155,9 @@ node integrations/mcp/src/index.mjs
 | 20 | `plan_task_on_material` | `COMPUTE=true` 且 `BUSINESS_READ=true` | 按任务剩余待排量在母卷/料头/自由画布上自动装配求解，默认有界轮询并附带 PNG 预览图与 `workbenchUrl` |
 | 21 | `create_demand_task` | `CUTTING_MCP_ALLOW_DEMAND_WRITE=true` | 创建或 `mergeIntoTaskId` 合并 2D 矩形 / 2D 异形带孔 / 1D 分条待排需求族，绝不扣实物库存 |
 | 22 | `save_draft_scheme` | `CUTTING_MCP_ALLOW_DRAFT_SCHEME=true` | 调用后端持久化接口 `POST /api/v2/workbench/drafts` 创建防篡改待审批草案与完整 `workbenchUrl`，绝不扣库存 |
+| 23 | `list_draft_schemes` | `CUTTING_MCP_BUSINESS_READ=true` | 分页倒序查询持久化草案列表（支持 `status`/`taskId`/`batchGroupId` 过滤）与工作台深链 |
+| 24 | `discard_draft_scheme` | `CUTTING_MCP_ALLOW_DRAFT_SCHEME=true` | 原子作废待确认草案并记录作废原因（`POST /api/v2/workbench/drafts/{draftId}/discard`），绝不扣库存 |
+| 25 | `plan_multi_material_drafts` | `COMPUTE=true`、`BUSINESS_READ=true` 且 `ALLOW_DRAFT_SCHEME=true` | 多料头接力 + 多母卷连续接力一键归档并生成同 `batchGroupId` 批量待审批草案组（可附前 N 份 PNG 预览），绝不锁扣库存 |
 
 ---
 

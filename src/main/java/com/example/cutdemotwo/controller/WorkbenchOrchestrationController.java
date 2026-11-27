@@ -1,5 +1,6 @@
 package com.example.cutdemotwo.controller;
 
+import com.example.cutdemotwo.business.workbench.MultiMaterialDraftOrchestrationService;
 import com.example.cutdemotwo.business.workbench.WorkbenchComparisonService;
 import com.example.cutdemotwo.business.workbench.WorkbenchDraftService;
 import com.example.cutdemotwo.business.workbench.WorkbenchPlanOrchestrator;
@@ -37,15 +38,18 @@ public class WorkbenchOrchestrationController {
     private final WorkbenchPlanOrchestrator orchestrator;
     private final WorkbenchComparisonService comparisonService;
     private final WorkbenchDraftService draftService;
+    private final MultiMaterialDraftOrchestrationService multiMaterialDraftService;
 
     public WorkbenchOrchestrationController(
             WorkbenchPlanOrchestrator orchestrator,
             WorkbenchComparisonService comparisonService,
-            WorkbenchDraftService draftService
+            WorkbenchDraftService draftService,
+            MultiMaterialDraftOrchestrationService multiMaterialDraftService
     ) {
         this.orchestrator = orchestrator;
         this.comparisonService = comparisonService;
         this.draftService = draftService;
+        this.multiMaterialDraftService = multiMaterialDraftService;
     }
 
     /** 1) 按任务剩余待排量与指定材料一键装配并提交 2D/1D 试排作业（返回 202）。 */
@@ -93,6 +97,48 @@ public class WorkbenchOrchestrationController {
     @GetMapping("/drafts/{draftId}")
     public WorkbenchSchemeDraft getDraft(@PathVariable String draftId) {
         return draftService.getDraft(draftId);
+    }
+
+    /** 6) 分页倒序查询持久化草案收件箱（支持按 status/taskId/batchGroupId 过滤，返回 200）。 */
+    @GetMapping("/drafts")
+    public WorkbenchDraftService.DraftListPage listDrafts(
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String taskId,
+            @RequestParam(required = false) String batchGroupId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        return draftService.listDrafts(status, taskId, batchGroupId, page, size);
+    }
+
+    /** 7) 原子确认草案状态跃迁（PENDING_CONFIRMATION -> CONFIRMED，返回 200 / 409）。 */
+    @PostMapping("/drafts/{draftId}/confirm")
+    public WorkbenchSchemeDraft confirmDraft(
+            @PathVariable String draftId,
+            @RequestBody(required = false) WorkbenchDraftService.ConfirmDraftRequest body
+    ) {
+        return draftService.confirmDraft(draftId, body, AuthContext.username());
+    }
+
+    /** 8) 原子作废待确认草案并记录作废原因（PENDING_CONFIRMATION -> DISCARDED，绝不扣库存，返回 200 / 409）。 */
+    @PostMapping("/drafts/{draftId}/discard")
+    public WorkbenchSchemeDraft discardDraft(
+            @PathVariable String draftId,
+            @RequestBody(required = false) WorkbenchDraftService.DiscardDraftRequest body
+    ) {
+        return draftService.discardDraft(draftId, body, AuthContext.username());
+    }
+
+    /** 9) 执行多料头接力 + 多母卷连续接力试排并批量生成同 batchGroupId 待确认草案组（返回 201）。 */
+    @PostMapping(value = "/multi-material-drafts", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<MultiMaterialDraftOrchestrationService.MultiMaterialDraftBatchResponse> createMultiMaterialDrafts(
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestBody(required = false) MultiMaterialDraftOrchestrationService.MultiMaterialDraftBatchRequest body
+    ) {
+        MultiMaterialDraftOrchestrationService.MultiMaterialDraftBatchResponse response =
+                multiMaterialDraftService.createMultiMaterialDrafts(body, idempotencyKey, AuthContext.username());
+        return ResponseEntity.created(URI.create("/api/v2/workbench/drafts?batchGroupId=" + response.batchGroupId()))
+                .body(response);
     }
 
     @ExceptionHandler(OptimizationFailure.class)

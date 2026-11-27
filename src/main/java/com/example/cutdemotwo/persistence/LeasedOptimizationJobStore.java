@@ -9,6 +9,7 @@ public interface LeasedOptimizationJobStore extends OptimizationJobStore {
     record Lease(StoredOptimizationJob document, String owner, long token, long remainingMillis) {}
     void configure(int workers, int queue, int archive);
     StoredOptimizationJob submitOrGet(StoredOptimizationJob document);
+    StoredOptimizationJob archiveCompletedOrGet(StoredOptimizationJob document);
     StoredOptimizationJob find(String id);
     StoredOptimizationJob findByKey(String key);
     default Lease claim(String owner,long leaseMillis) {return claim(owner,leaseMillis,document->true);}

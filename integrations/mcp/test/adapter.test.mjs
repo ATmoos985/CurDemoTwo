@@ -320,7 +320,10 @@ test('OpenAPI 阶段四与阶段一工作台编排全部新增路径与 $ref 引
     '/api/v2/workbench/tasks/{taskId}/result-comparison',
     '/api/v2/workbench/results/{resultId}/context',
     '/api/v2/workbench/drafts',
-    '/api/v2/workbench/drafts/{draftId}'
+    '/api/v2/workbench/drafts/{draftId}',
+    '/api/v2/workbench/drafts/{draftId}/confirm',
+    '/api/v2/workbench/drafts/{draftId}/discard',
+    '/api/v2/workbench/multi-material-drafts'
   ];
   for (const p of expectedPaths) {
     assert.ok(openapi.paths[p], `OpenAPI 缺少路径 ${p}`);
@@ -341,14 +344,14 @@ test('OpenAPI 阶段四与阶段一工作台编排全部新增路径与 $ref 引
   }
 });
 
-test('tool discovery strictly enforces grant matrix (7 / 9 / 17 / 20 / 21 / 22 tools) and blocks stock mutation tools', async () => {
+test('tool discovery strictly enforces grant matrix (7 / 9 / 18 / 21 / 24 / 25 tools) and blocks stock mutation tools', async () => {
   const checks = [
     [{ compute: false, businessRead: false, allowDraftScheme: false, allowDemandWrite: false }, 7],
     [{ compute: true, businessRead: false, allowDraftScheme: false, allowDemandWrite: false }, 9],
-    [{ compute: false, businessRead: true, allowDraftScheme: false, allowDemandWrite: false }, 17],
-    [{ compute: true, businessRead: true, allowDraftScheme: false, allowDemandWrite: false }, 20],
-    [{ compute: true, businessRead: true, allowDraftScheme: true, allowDemandWrite: false }, 21],
-    [{ compute: true, businessRead: true, allowDraftScheme: true, allowDemandWrite: true }, 22]
+    [{ compute: false, businessRead: true, allowDraftScheme: false, allowDemandWrite: false }, 18],
+    [{ compute: true, businessRead: true, allowDraftScheme: false, allowDemandWrite: false }, 21],
+    [{ compute: true, businessRead: true, allowDraftScheme: true, allowDemandWrite: false }, 24],
+    [{ compute: true, businessRead: true, allowDraftScheme: true, allowDemandWrite: true }, 25]
   ];
 
   for (const [cfg, expectedCount] of checks) {
@@ -370,6 +373,11 @@ test('tool discovery strictly enforces grant matrix (7 / 9 / 17 / 20 / 21 / 22 t
       }
       if (!cfg.allowDraftScheme) {
         assert.equal(tools.some((t) => t.name === 'save_draft_scheme'), false);
+        assert.equal(tools.some((t) => t.name === 'discard_draft_scheme'), false);
+        assert.equal(tools.some((t) => t.name === 'plan_multi_material_drafts'), false);
+      }
+      if (!cfg.businessRead) {
+        assert.equal(tools.some((t) => t.name === 'list_draft_schemes'), false);
       }
     } finally {
       await session.close();
@@ -384,9 +392,9 @@ test('tool discovery strictly enforces grant matrix (7 / 9 / 17 / 20 / 21 / 22 t
   });
   try {
     const { tools } = await fullSession.client.listTools();
-    assert.equal(tools.length, 22);
+    assert.equal(tools.length, 25);
     const names = new Set(tools.map((t) => t.name));
-    const expectedAll22 = [
+    const expectedAll25 = [
       'get_cutting_capabilities',
       'validate_cutting_problem',
       'get_optimization_job',
@@ -408,9 +416,12 @@ test('tool discovery strictly enforces grant matrix (7 / 9 / 17 / 20 / 21 / 22 t
       'compare_task_results',
       'plan_task_on_material',
       'create_demand_task',
-      'save_draft_scheme'
+      'save_draft_scheme',
+      'list_draft_schemes',
+      'discard_draft_scheme',
+      'plan_multi_material_drafts'
     ];
-    for (const expected of expectedAll22) {
+    for (const expected of expectedAll25) {
       assert.ok(names.has(expected), `缺少工具 ${expected}`);
     }
     assert.equal(tools.find((t) => t.name === 'render_cutting_preview').annotations.readOnlyHint, true);
@@ -1243,7 +1254,7 @@ test('Streamable HTTP 强制鉴权（无 token 拒绝启动 / 401 拦截 / 200 �
     });
     assert.equal(listed.status, 200);
     const listBody = await listed.json();
-    assert.equal(listBody.result.tools.length, 22);
+    assert.equal(listBody.result.tools.length, 25);
     assert.ok(listed.headers.get('mcp-session-id'));
 
     const called = await fetch(httpMcp.endpointUrl, {
@@ -1268,7 +1279,7 @@ test('Streamable HTTP 强制鉴权（无 token 拒绝启动 / 401 拦截 / 200 �
     });
     assert.equal(called.status, 200);
     const callBody = await called.json();
-    assert.equal(callBody.result.isError, undefined);
+    assert.equal(callBody.result.isError, undefined, JSON.stringify(callBody));
     assert.equal(callBody.result.structuredContent.data.totalSavedAreaM2, 2.88);
     assert.equal(backendAuthHeaders[0], `Bearer ${backendToken}`);
 
@@ -1349,4 +1360,173 @@ test('stdio SDK handshake discovers default 7 tools, 2 resources and 3 prompts w
     await client.close();
   }
   assert.ok(diagnostics.includes('get_optimization_job'));
+});
+
+test('list_draft_schemes queries paged drafts and normalizes workbenchUrl', async () => {
+  const calls = [];
+  const session = await connected({ businessRead: true }, async (path) => {
+    calls.push(path);
+    return {
+      items: [
+        {
+          id: 'DFT-101',
+          draftId: 'DFT-101',
+          status: 'PENDING_CONFIRMATION',
+          batchGroupId: 'MMB-001',
+          target: { resultId: 'RES-101', taskId: 'TASK-101', materialId: 'ROLL-1', materialType: 'STOCK_ROLL' },
+          workbenchUrl: '/app/#/workbench?taskId=TASK-101&resultId=RES-101&draftId=DFT-101'
+        }
+      ],
+      total: 1,
+      page: 0,
+      size: 10,
+      pendingCount: 3
+    };
+  });
+  try {
+    const res = await session.client.callTool({
+      name: 'list_draft_schemes',
+      arguments: { status: 'PENDING_CONFIRMATION', batchGroupId: 'MMB-001', page: 0, size: 10 }
+    });
+    assert.ok(!res.isError, JSON.stringify(res));
+    assert.ok(calls[0].includes('/api/v2/workbench/drafts?'));
+    assert.ok(calls[0].includes('status=PENDING_CONFIRMATION'));
+    assert.ok(calls[0].includes('batchGroupId=MMB-001'));
+    const data = res.structuredContent.data;
+    assert.equal(data.pendingCount, 3);
+    assert.equal(
+      data.items[0].workbenchUrl,
+      'http://127.0.0.1:8080/app/#/workbench?taskId=TASK-101&resultId=RES-101&draftId=DFT-101'
+    );
+  } finally {
+    await session.close();
+  }
+});
+
+test('plan_multi_material_drafts returns batch drafts, PNG previews, and explicit partialErrors on preview failure', async () => {
+  const session = await connected(
+    { compute: true, businessRead: true, allowDraftScheme: true },
+    async (path) => {
+      if (path === '/api/v2/workbench/multi-material-drafts') {
+        return {
+          batchGroupId: 'MMB-TEST-01',
+          inventoryMutated: false,
+          requiresHumanConfirmation: true,
+          draftCount: 2,
+          drafts: [
+            {
+              id: 'DFT-A',
+              draftId: 'DFT-A',
+              status: 'PENDING_CONFIRMATION',
+              inventoryMutated: false,
+              requiresHumanConfirmation: true,
+              batchGroupId: 'MMB-TEST-01',
+              batchIndex: 1,
+              batchTotal: 2,
+              target: { resultId: 'RES-A', taskId: 'TASK-1', materialId: 'REM-1', materialType: 'REMNANT' },
+              riskChecks: [{ code: 'RESULT_VALIDATED', passed: true, message: 'ok' }]
+            },
+            {
+              id: 'DFT-B',
+              draftId: 'DFT-B',
+              status: 'PENDING_CONFIRMATION',
+              inventoryMutated: false,
+              requiresHumanConfirmation: true,
+              batchGroupId: 'MMB-TEST-01',
+              batchIndex: 2,
+              batchTotal: 2,
+              target: { resultId: 'RES-B', taskId: 'TASK-1', materialId: 'ROLL-1', materialType: 'STOCK_ROLL' },
+              riskChecks: [{ code: 'RESULT_VALIDATED', passed: true, message: 'ok' }]
+            }
+          ],
+          planResult: {
+            materialModel: 'TC-2026',
+            totalRequestedPieces: 4,
+            placedByRemnants: 1,
+            placedByRoll: 3,
+            unplacedPieces: 0,
+            totalSavedAreaM2: 0.45,
+            remnantAllocations: [{ remnantId: 'REM-1', placedCount: 1, utilizationPct: 80.5 }],
+            rollOptions: [{ rollId: 'ROLL-1', placedCount: 3, utilizationPct: 86.2, recommended: true }],
+            warnings: []
+          },
+          warnings: []
+        };
+      }
+      if (path === '/api/v2/workbench/results/RES-A/context') {
+        return {
+          input: {
+            problemType: 'NESTING_2D',
+            problem: {
+              material: { id: 'REM-1', shape: { type: 'RECTANGLE', width: 1000, height: 1000 }, exclusions: [] }
+            }
+          },
+          result: {
+            validationStatus: 'PASSED',
+            fulfillmentStatus: 'COMPLETE',
+            layout: {
+              processingRegion: { width: 1000, height: 1000 },
+              placements: [
+                { id: 1, demandId: 1, name: 'A', x: 0, y: 0, shape: { type: 'RECTANGLE', width: 500, height: 600 } }
+              ],
+              leftovers: [],
+              fulfillment: [{ demandId: 1, requested: 1, placed: 1, unplaced: 0 }]
+            },
+            metrics: []
+          }
+        };
+      }
+      if (path === '/api/v2/workbench/results/RES-B/context') {
+        throw new ToolFailure('STORAGE_UNAVAILABLE', '模拟预览上下文超时', true, 503);
+      }
+      throw new Error('Unexpected path: ' + path);
+    }
+  );
+  try {
+    const res = await session.client.callTool({
+      name: 'plan_multi_material_drafts',
+      arguments: { taskId: 'TASK-1', includePreview: true, previewMaxCount: 2 }
+    });
+    assert.ok(!res.isError, JSON.stringify(res));
+    const data = res.structuredContent.data;
+    assert.equal(data.batchGroupId, 'MMB-TEST-01');
+    assert.equal(data.inventoryMutated, false);
+    assert.equal(data.requiresHumanConfirmation, true);
+    assert.equal(data.draftCount, 2);
+    assert.equal(data.previewIncluded, true);
+    assert.deepEqual(data.previewedDraftIds, ['DFT-A']);
+    assert.equal(data.partialErrors.length, 1);
+    assert.equal(data.partialErrors[0].source, 'preview:DFT-B');
+    const imgBlock = res.content.find((c) => c.type === 'image');
+    assert.ok(imgBlock && imgBlock.mimeType === 'image/png');
+  } finally {
+    await session.close();
+  }
+});
+
+test('discard_draft_scheme propagates 409 conflict and audit log omits sensitive reason text', async () => {
+  const audits = [];
+  const secretReason = 'SENSITIVE-DISCARD-REASON-998877';
+  const session = await connected(
+    { allowDraftScheme: true },
+    async (path, body) => {
+      assert.equal(path, '/api/v2/workbench/drafts/DFT-LOCKED/discard');
+      assert.equal(body.reason, secretReason);
+      throw new ToolFailure('DRAFT_ALREADY_CONFIRMED', '草案已确认落库，不可作废', false, 409);
+    },
+    (e) => audits.push(e)
+  );
+  try {
+    const res = await session.client.callTool({
+      name: 'discard_draft_scheme',
+      arguments: { draftId: 'DFT-LOCKED', reason: secretReason }
+    });
+    assert.equal(res.isError, true);
+    const errPayload = JSON.parse(res.content[0].text);
+    assert.equal(errPayload.code, 'DRAFT_ALREADY_CONFIRMED');
+    assert.equal(audits.length, 1);
+    assert.equal(JSON.stringify(audits[0]).includes(secretReason), false);
+  } finally {
+    await session.close();
+  }
 });

@@ -18,11 +18,13 @@ export interface WorkbenchTopBarProps {
   rightPaneRef: RefObject<HTMLElement | null>;
   stripRef: RefObject<HTMLDivElement | null>;
 
-  // 侧栏一键折叠（平板/窄屏适配）
+  // 侧栏一键折叠（平板/窄屏适配） & 草案收件箱入口
   leftCollapsed: boolean;
   rightCollapsed: boolean;
   onToggleLeftPane: () => void;
   onToggleRightPane: () => void;
+  pendingDraftCount?: number;
+  onOpenDraftInbox?: () => void;
 
   // 2D spec
   canvasMode: CanvasMode2D;
@@ -75,6 +77,8 @@ export const WorkbenchTopBar: React.FC<WorkbenchTopBarProps> = ({
   rightCollapsed,
   onToggleLeftPane,
   onToggleRightPane,
+  pendingDraftCount = 0,
+  onOpenDraftInbox,
   canvasMode,
   scenario2D,
   multiWidthsText2D,
@@ -723,6 +727,21 @@ export const WorkbenchTopBar: React.FC<WorkbenchTopBarProps> = ({
       )}
 
       <span className="sp" />
+
+      {onOpenDraftInbox && (
+        <button
+          type="button"
+          className="btn sm wb-draft-inbox-trigger"
+          onClick={onOpenDraftInbox}
+          title="打开待确认草案收件箱（仅预览核对，未扣减库存）"
+          data-testid="draft-inbox-trigger"
+        >
+          <span>待审草案</span>
+          <span className={`wb-draft-count-badge num ${pendingDraftCount > 0 ? '' : 'is-zero'}`}>
+            {pendingDraftCount}
+          </span>
+        </button>
+      )}
 
       {/* 工业平板/窄屏快速收折左右侧栏按钮 */}
       <div className="wb-pane-toggles" role="group" aria-label="侧栏收折控制">

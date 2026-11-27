@@ -117,6 +117,42 @@ public final class JdbcOptimizationJobStore implements LeasedOptimizationJobStor
     }
 
     @Override
+    public StoredOptimizationJob archiveCompletedOrGet(StoredOptimizationJob document) {
+        if (workers < 1) throw new IllegalStateException("作业存储尚未配置");
+        Objects.requireNonNull(document, "归档计算文档不能为空");
+        return locked(() -> {
+            String digest = digest(document.idempotencyKey());
+            var old = jdbc.query("SELECT id FROM optimization_job WHERE key_digest=?", (rs, n) -> rs.getString(1), digest);
+            if (!old.isEmpty()) {
+                var found = find(old.get(0));
+                if (!found.job().inputHash().equals(document.job().inputHash())) {
+                    throw new OptimizationFailure("IDEMPOTENCY_CONFLICT", "同一幂等键已绑定不同请求", 409, false);
+                }
+                return found;
+            }
+            long nowMs = now();
+            long stored = jdbc.queryForObject("SELECT COUNT(*) FROM optimization_job", Long.class);
+            if (stored >= archive) {
+                int minToFree = (int) Math.min(Integer.MAX_VALUE, stored - archive + 1);
+                stored -= evictTerminalLocked(nowMs, terminalRetentionMillis, minToFree);
+            }
+            if (stored >= archive) {
+                throw new OptimizationFailure("QUOTA_EXCEEDED", "共享作业归档限额已满且无可清理的终态作业", 429, true);
+            }
+            var j = document.job();
+            jdbc.update("INSERT INTO optimization_job(id,key_digest,state,created_at,token,document_json) VALUES(?,?,?,?,0,?)",
+                    j.id(), digest, j.state(), nowMs, json.writeValueAsString(document));
+            jdbc.update("INSERT INTO optimization_attempt(job_id,token,owner_id,started_at,finished_at,outcome) VALUES(?,0,'workbench-sync-archive',?,?,'COMPLETED')",
+                    j.id(), nowMs, nowMs);
+            if (document.result() != null) {
+                jdbc.update("INSERT INTO optimization_result(job_id,token,result_json) VALUES(?,0,?)",
+                        j.id(), json.writeValueAsString(document.result()));
+            }
+            return document;
+        });
+    }
+
+    @Override
     public int purgeExpiredTerminal(long retentionMillis) {
         if (retentionMillis < 0) throw new IllegalArgumentException("终态作业保留时长不能为负数");
         return locked(() -> evictTerminalLocked(now(), retentionMillis, 0));

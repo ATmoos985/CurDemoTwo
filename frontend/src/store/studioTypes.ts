@@ -156,6 +156,8 @@ export interface SavedScheme2D {
   layoutValidationErrors?: string[];
   dispatchedTaskId?: string;
   confirmedSchemeId?: string;
+  draftId?: string;
+  draftBatchGroupId?: string;
 }
 
 export interface SlittingOrderLine {
@@ -213,6 +215,8 @@ export interface SlittingSchemeRun {
   rawResult?: any;
   dispatchedTaskId?: string;
   confirmedSchemeId?: string;
+  draftId?: string;
+  draftBatchGroupId?: string;
 }
 
 export interface DemandFamilySummary {

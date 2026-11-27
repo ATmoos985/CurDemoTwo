@@ -38,6 +38,9 @@ export interface WorkbenchRightPanelProps {
   onConfirmSelectedScheme1D: () => void;
   onQuickExportCam: (kind: 'dxf' | 'nc') => void;
   onExportMultiMaterialCsv?: () => void;
+  onGenerateMultiMaterialDrafts?: () => void;
+  generatingMultiMaterialDrafts?: boolean;
+  activeDraftBlockedReason?: string | null;
   onStopSolve: () => void;
   onRunSolve2D: () => void;
   onRunSolve1D: () => void;
@@ -104,6 +107,9 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
   onConfirmSelectedScheme1D,
   onQuickExportCam,
   onExportMultiMaterialCsv,
+  onGenerateMultiMaterialDrafts,
+  generatingMultiMaterialDrafts = false,
+  activeDraftBlockedReason = null,
   onStopSolve,
   onRunSolve2D,
   onRunSolve1D,
@@ -164,6 +170,18 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
               <span>多料联排总览</span>
               <span className="tag kind num">{multiMaterialSummary.elapsedMs}ms</span>
               <span className="sp" />
+              {onGenerateMultiMaterialDrafts && (
+                <button
+                  type="button"
+                  className="btn sm"
+                  disabled={generatingMultiMaterialDrafts || runningSolve}
+                  onClick={onGenerateMultiMaterialDrafts}
+                  title="执行多料头+多母卷连续接力并生成同批组待确认草案（不锁扣库存）"
+                  data-testid="generate-multi-drafts-btn"
+                >
+                  {generatingMultiMaterialDrafts ? '生成中…' : '生成联排草案组'}
+                </button>
+              )}
               {onExportMultiMaterialCsv && (
                 <button
                   type="button"
@@ -436,10 +454,13 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
                 className="btn pri value-primary-cta"
                 disabled={
                   confirmingScheme ||
-                  Boolean(activeScheme2D.layoutDirty && !activeScheme2D.confirmedSchemeId)
+                  Boolean(activeScheme2D.layoutDirty && !activeScheme2D.confirmedSchemeId) ||
+                  Boolean(activeDraftBlockedReason && !activeScheme2D.confirmedSchemeId)
                 }
                 title={
-                  activeScheme2D.layoutDirty && !activeScheme2D.confirmedSchemeId
+                  activeDraftBlockedReason && !activeScheme2D.confirmedSchemeId
+                    ? activeDraftBlockedReason
+                    : activeScheme2D.layoutDirty && !activeScheme2D.confirmedSchemeId
                     ? '已手调，需校验并重建刀路后才可选定此方案'
                     : '扣减待排需求并保存至结果管理'
                 }
@@ -545,8 +566,12 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
               <button
                 type="button"
                 className="btn pri value-primary-cta"
-                disabled={confirmingScheme}
-                title="扣减待排需求并保存至结果管理"
+                disabled={confirmingScheme || Boolean(activeDraftBlockedReason && !activeScheme1D.confirmedSchemeId)}
+                title={
+                  activeDraftBlockedReason && !activeScheme1D.confirmedSchemeId
+                    ? activeDraftBlockedReason
+                    : '扣减待排需求并保存至结果管理'
+                }
                 onClick={onConfirmSelectedScheme1D}
               >
                 {confirmingScheme

@@ -599,6 +599,76 @@ public class OptimizationService implements AutoCloseable {
         return documents.getOrDefault(id, accepted).job();
     }
 
+    /** 直接同步归档已完成计算的 2D 排料布局（供多料联排协同跳过异步重算生成 {@code resultId}）。 */
+    public StoredOptimizationJob archiveCompleted2DResult(
+            String key,
+            OptimizationRequest input,
+            NestingResult layout,
+            WorkbenchJobSource workbenchSource
+    ) {
+        if (key == null || !key.matches("[A-Za-z0-9._:-]{8,128}"))
+            throw new Failure("INVALID_INPUT", "Idempotency-Key 必须为 8–128 个字母、数字或 . _ : -", 400, false);
+        if (input == null || !"NESTING_2D".equals(input.problemType()))
+            throw new Failure("INVALID_INPUT", "同步归档仅支持 NESTING_2D 计算请求", 400, false);
+
+        String inputHash = hash(input);
+        if (shared != null) {
+            var existing = shared.findByKey(key);
+            if (existing != null) {
+                assertIdempotencyMatch(existing, inputHash, workbenchSource);
+                return existing;
+            }
+            if (closing) throw new Failure("SERVICE_UNAVAILABLE", "作业服务正在关闭", 503, true);
+            validate(input);
+            StoredOptimizationJob doc = OptimizationArchiveSupport.buildArchived2DDocument(
+                    key, input, layout, workbenchSource, System.currentTimeMillis());
+            try {
+                var stored = shared.archiveCompletedOrGet(doc);
+                assertIdempotencyMatch(stored, inputHash, workbenchSource);
+                return stored;
+            } catch (OptimizationFailure failure) {
+                if (failure instanceof Failure typed) throw typed;
+                throw new Failure(failure.code, failure.getMessage(), failure.status, failure.retryable);
+            }
+        }
+
+        String existingId = keys.get(key);
+        if (existingId != null) {
+            var old = documents.get(existingId);
+            if (old != null) {
+                assertIdempotencyMatch(old, inputHash, workbenchSource);
+                return old;
+            }
+        }
+        if (closing || storageFailed)
+            throw new Failure("SERVICE_UNAVAILABLE", "作业服务暂不可受理，请检查服务与持久化状态", 503, true);
+        validate(input);
+        StoredOptimizationJob doc = OptimizationArchiveSupport.buildArchived2DDocument(
+                key, input, layout, workbenchSource, System.currentTimeMillis());
+        synchronized (fileAdmissionLock) {
+            String doubleCheckId = keys.get(key);
+            if (doubleCheckId != null) {
+                var old = documents.get(doubleCheckId);
+                if (old != null) {
+                    assertIdempotencyMatch(old, inputHash, workbenchSource);
+                    return old;
+                }
+            }
+            if (closing || storageFailed)
+                throw new Failure("SERVICE_UNAVAILABLE", "作业服务暂不可受理，请检查服务与持久化状态", 503, true);
+            if (documents.size() >= maxStored) {
+                evictTerminalJobsFileModeLocked(true);
+            }
+            if (documents.size() >= maxStored)
+                throw new Failure("QUOTA_EXCEEDED", "作业归档限额已满且无终态作业可清理；请等待活跃作业完成后重试", 429, true);
+            synchronized (lockFor(doc.job().id())) {
+                persist(doc);
+            }
+            keys.put(key, doc.job().id());
+            return doc;
+        }
+    }
+
     private static void assertIdempotencyMatch(StoredOptimizationJob existing, String inputHash, WorkbenchJobSource incomingSource) {
         if (!existing.job().inputHash().equals(inputHash)) {
             throw new Failure("IDEMPOTENCY_CONFLICT", "同一幂等键已绑定不同请求", 409, false);

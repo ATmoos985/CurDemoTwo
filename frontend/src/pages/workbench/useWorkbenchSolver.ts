@@ -232,6 +232,8 @@ export interface UseWorkbenchSolverOptions {
   reloadReferenceData: (explicitTaskId?: string | null) => Promise<DemandFamilySummary[]>;
   syncDemandFamilyProgress: (fam: DemandFamilySummary) => void;
   syncMergedDemandFamiliesProgress?: (fams: DemandFamilySummary[]) => void;
+  onDraftConfirmed?: (draftId: string, confirmedSchemeId: string) => void;
+  onDraftConfirmFailed?: (draftId: string) => void;
 }
 
 export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
@@ -293,7 +295,9 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
     batchGuardWarning,
     reloadReferenceData,
     syncDemandFamilyProgress,
-    syncMergedDemandFamiliesProgress
+    syncMergedDemandFamiliesProgress,
+    onDraftConfirmed,
+    onDraftConfirmFailed
   } = opts;
 
   const [runningSolve, setRunningSolve] = useState(false);
@@ -1189,6 +1193,7 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
 
       const confirmBody = {
         idempotencyKey,
+        ...(activeScheme2D.draftId ? { draftId: activeScheme2D.draftId } : {}),
         title: activeScheme2D.title,
         dimension: hasPoly ? 'CONTOUR_2D' : 'RECT_2D',
         scenarioId: activeScheme2D.scenarioId || scenario2D,
@@ -1258,6 +1263,9 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
       const savedScheme = res.scheme;
       const updatedFamily: DemandFamilySummary | undefined = res.demandFamily;
       markSchemeDispatched(activeScheme2D.id, savedScheme.taskId, savedScheme.id);
+      if (activeScheme2D.draftId) {
+        onDraftConfirmed?.(activeScheme2D.draftId, savedScheme.id);
+      }
 
       const refreshedFamilies = await reloadReferenceData(
         allocSummary.isMultiFamily ? null : savedScheme.taskId
@@ -1283,6 +1291,9 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
 
       toast(`已确认 ${savedScheme.id}`);
     } catch (err: any) {
+      if (activeScheme2D.draftId) {
+        onDraftConfirmFailed?.(activeScheme2D.draftId);
+      }
       toast('确认失败：' + err.message, true);
     } finally {
       setConfirmingScheme(false);
@@ -1334,6 +1345,7 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
 
       const confirmBody = {
         idempotencyKey,
+        ...(activeScheme1D.draftId ? { draftId: activeScheme1D.draftId } : {}),
         title: `${activeScheme1D.strategyName} (${activeScheme1D.motherWidthMm}mm · ${activeScheme1D.totalCars}车)`,
         dimension: 'SLITTING_1D',
         scenarioId: scenario1D,
@@ -1420,6 +1432,9 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
       const savedScheme = res.scheme;
       const updatedFamily: DemandFamilySummary | undefined = res.demandFamily;
       markSlitSchemeDispatched(activeScheme1D.id, savedScheme.taskId, savedScheme.id);
+      if (activeScheme1D.draftId) {
+        onDraftConfirmed?.(activeScheme1D.draftId, savedScheme.id);
+      }
       const refreshedFamilies = await reloadReferenceData(
         allocSummary.isMultiFamily ? null : savedScheme.taskId
       );
@@ -1443,6 +1458,9 @@ export function useWorkbenchSolver(opts: UseWorkbenchSolverOptions) {
       }
       toast(`已确认 ${savedScheme.id}`);
     } catch (err: any) {
+      if (activeScheme1D.draftId) {
+        onDraftConfirmFailed?.(activeScheme1D.draftId);
+      }
       toast('确认失败：' + err.message, true);
     } finally {
       setConfirmingScheme(false);

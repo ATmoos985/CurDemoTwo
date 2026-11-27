@@ -5025,6 +5025,85 @@
       }
     },
     "/api/v2/workbench/drafts": {
+      "get": {
+        "summary": "分页倒序查询持久化工作台草案收件箱",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ALL",
+                "PENDING_CONFIRMATION",
+                "CONFIRMED",
+                "DISCARDED",
+                "EXPIRED"
+              ]
+            }
+          },
+          {
+            "name": "taskId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "batchGroupId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paged workbench scheme drafts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchDraftPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "summary": "创建持久化待人工确认排料草案（绝不修改实物库存）",
         "requestBody": {
@@ -5128,6 +5207,219 @@
           },
           "404": {
             "description": "Draft not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/workbench/drafts/{draftId}/confirm": {
+      "post": {
+        "summary": "原子确认持久化草案并绑定正式方案编号",
+        "parameters": [
+          {
+            "name": "draftId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkbenchConfirmDraftRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Draft transitioned to CONFIRMED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchSchemeDraft"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid draftId or payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Draft not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Draft already confirmed, discarded, or expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/workbench/drafts/{draftId}/discard": {
+      "post": {
+        "summary": "原子作废待确认草案并记录作废原因（绝不修改实物库存）",
+        "parameters": [
+          {
+            "name": "draftId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkbenchDiscardDraftRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Draft transitioned to DISCARDED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchSchemeDraft"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid discard request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Draft not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Draft already confirmed, discarded, or expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/workbench/multi-material-drafts": {
+      "post": {
+        "summary": "执行多料头接力与多母卷连续接力试排并批量生成同批组待确认草案（绝不锁扣库存）",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MultiMaterialDraftBatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Batch of persisted drafts awaiting human confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultiMaterialDraftBatchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency or storage conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "No feasible layout or unsupported constraint",
             "content": {
               "application/json": {
                 "schema": {
@@ -8919,6 +9211,12 @@
               "object",
               "null"
             ]
+          },
+          "draftId": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -9600,6 +9898,9 @@
             "items": {
               "$ref": "#/components/schemas/MultiMaterialDemandItem"
             }
+          },
+          "continueAcrossRolls": {
+            "type": "boolean"
           }
         }
       },
@@ -9870,6 +10171,26 @@
           }
         }
       },
+      "MultiMaterialAllocatedItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "demandId",
+          "name",
+          "quantity"
+        ],
+        "properties": {
+          "demandId": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "integer"
+          }
+        }
+      },
       "MultiMaterialRollOption": {
         "type": "object",
         "additionalProperties": false,
@@ -9951,6 +10272,35 @@
               "string",
               "null"
             ]
+          },
+          "relayOrder": {
+            "type": "integer"
+          },
+          "allocatedItems": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MultiMaterialAllocatedItem"
+            }
+          }
+        }
+      },
+      "MultiMaterialAllocatedItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "demandId",
+          "name",
+          "quantity"
+        ],
+        "properties": {
+          "demandId": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "integer"
           }
         }
       },
@@ -11056,6 +11406,8 @@
             "type": "string",
             "enum": [
               "PENDING_CONFIRMATION",
+              "CONFIRMED",
+              "DISCARDED",
               "EXPIRED"
             ]
           },
@@ -11123,6 +11475,247 @@
               "integer",
               "null"
             ]
+          },
+          "batchGroupId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "batchIndex": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "batchTotal": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "confirmedSchemeId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "confirmedBy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "confirmedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "discardedBy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "discardedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "discardReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "WorkbenchDraftPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "size",
+          "pendingCount"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchSchemeDraft"
+            }
+          },
+          "total": {
+            "type": "integer"
+          },
+          "page": {
+            "type": "integer"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "pendingCount": {
+            "type": "integer"
+          }
+        }
+      },
+      "WorkbenchConfirmDraftRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "schemeId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 128
+          },
+          "operator": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 120
+          }
+        }
+      },
+      "WorkbenchDiscardDraftRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 500
+          },
+          "operator": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 120
+          }
+        }
+      },
+      "MultiMaterialDraftBatchRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "materialModel": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "requiredBatchNo": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "requiredColor": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "preferRemnants": {
+            "type": "boolean"
+          },
+          "maxRemnants": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 20
+          },
+          "candidateRollIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "timeBudgetMs": {
+            "type": "integer",
+            "minimum": 500,
+            "maximum": 30000
+          },
+          "pieceGapMm": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 200
+          },
+          "trimStartMm": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 500
+          },
+          "demands": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "$ref": "#/components/schemas/MultiMaterialDemandItem"
+            }
+          },
+          "continueAcrossRolls": {
+            "type": "boolean"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "ttlSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 86400
+          }
+        }
+      },
+      "MultiMaterialDraftBatchResponse": {
+        "type": "object",
+        "required": [
+          "batchGroupId",
+          "inventoryMutated",
+          "requiresHumanConfirmation",
+          "draftCount",
+          "drafts",
+          "planResult",
+          "warnings"
+        ],
+        "properties": {
+          "batchGroupId": {
+            "type": "string"
+          },
+          "inventoryMutated": {
+            "type": "boolean",
+            "const": false
+          },
+          "requiresHumanConfirmation": {
+            "type": "boolean",
+            "const": true
+          },
+          "draftCount": {
+            "type": "integer"
+          },
+          "drafts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkbenchSchemeDraft"
+            }
+          },
+          "planResult": {
+            "$ref": "#/components/schemas/MultiMaterialPlanResponse"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       }

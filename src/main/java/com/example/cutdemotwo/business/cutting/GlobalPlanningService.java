@@ -29,6 +29,7 @@ public class GlobalPlanningService {
     private static final int DEFAULT_MAX_REMNANTS = 6;
     private static final int MAX_REMNANTS_CAP = 20;
     private static final int MAX_ROLL_WIDTH_CANDIDATES = 8;
+    private static final int MAX_RELAY_ROLL_CANDIDATES = 12;
     private static final long DEFAULT_TIME_BUDGET_MS = 6000L;
     private static final long MIN_TIME_BUDGET_MS = 500L;
     private static final long MAX_TIME_BUDGET_MS = 30000L;
@@ -84,8 +85,26 @@ public class GlobalPlanningService {
             Long timeBudgetMs,
             Double pieceGapMm,
             Double trimStartMm,
-            List<DemandItem> demands
-    ) {}
+            List<DemandItem> demands,
+            Boolean continueAcrossRolls
+    ) {
+        public MultiMaterialPlanRequest(
+                String taskId,
+                String materialModel,
+                String requiredBatchNo,
+                String requiredColor,
+                Boolean preferRemnants,
+                Integer maxRemnants,
+                List<String> candidateRollIds,
+                Long timeBudgetMs,
+                Double pieceGapMm,
+                Double trimStartMm,
+                List<DemandItem> demands
+        ) {
+            this(taskId, materialModel, requiredBatchNo, requiredColor, preferRemnants, maxRemnants,
+                    candidateRollIds, timeBudgetMs, pieceGapMm, trimStartMm, demands, null);
+        }
+    }
 
     public record AllocatedItem(int demandId, String name, int quantity) {}
 
@@ -151,7 +170,9 @@ public class GlobalPlanningService {
             List<Defect> defects,
             String rollModel,
             String batchNo,
-            String color
+            String color,
+            Integer relayOrder,
+            List<AllocatedItem> allocatedItems
     ) {
         public RollOption(
                 String rollId,
@@ -164,7 +185,29 @@ public class GlobalPlanningService {
                 boolean recommended
         ) {
             this(rollId, widthMm, availableLengthMm, estimatedCutLengthMm, utilizationPct, placedCount,
-                    feasible, recommended, null, null, List.of(), List.of(), null, null, null);
+                    feasible, recommended, null, null, List.of(), List.of(), null, null, null, null, null);
+        }
+
+        public RollOption(
+                String rollId,
+                double widthMm,
+                double availableLengthMm,
+                double estimatedCutLengthMm,
+                double utilizationPct,
+                int placedCount,
+                boolean feasible,
+                boolean recommended,
+                Double windowStartY,
+                Double totalLengthMm,
+                List<PlacementSnapshot> placements,
+                List<Defect> defects,
+                String rollModel,
+                String batchNo,
+                String color
+        ) {
+            this(rollId, widthMm, availableLengthMm, estimatedCutLengthMm, utilizationPct, placedCount,
+                    feasible, recommended, windowStartY, totalLengthMm, placements, defects,
+                    rollModel, batchNo, color, null, null);
         }
     }
 
@@ -184,7 +227,7 @@ public class GlobalPlanningService {
 
     // ==================== 内部只读快照数据结构 ====================
 
-    private record NormalizedDemand(
+    static record NormalizedDemand(
             int id,
             String name,
             double width,
@@ -210,7 +253,7 @@ public class GlobalPlanningService {
             List<Defect> defects
     ) {}
 
-    private record RollSnapshot(
+    static record RollSnapshot(
             String rollId,
             String materialModel,
             String batchNo,
@@ -359,16 +402,57 @@ public class GlobalPlanningService {
             }
         }
 
-        // 3. 阶段二：若仍有未满足需求，逐母卷/门幅试算最省料方案并排序推荐
+        // 3. 阶段二：若仍有未满足需求，按单卷推荐或跨卷连续接力试算
         int remainingTotal = sumValues(remainingQty);
         List<RollOption> rollOptions = new ArrayList<>();
         int placedByRoll = 0;
 
         if (remainingTotal > 0) {
-            List<NormalizedDemand> remainingDemands = currentRemainingDemands(ctx.demands(), remainingQty);
             if (ctx.candidateRolls().isEmpty()) {
                 warnings.add("未找到满足型号与防色差条件且有净可用余长的合格在库母卷");
+            } else if (Boolean.TRUE.equals(request.continueAcrossRolls())) {
+                MultiMaterialRollRelayHelper.RelayOutcome<RollTrialOutcome> relay =
+                        MultiMaterialRollRelayHelper.planAcrossRolls(
+                                ctx.candidateRolls(),
+                                RollSnapshot::rollId,
+                                remainingQty,
+                                deadlineNanos,
+                                warnings,
+                                (roll, remMap, activeTotal, perRollSec) -> {
+                                    List<NormalizedDemand> activeDemands = currentRemainingDemands(ctx.demands(), remMap);
+                                    RollTrialOutcome outcome = evaluateRoll(
+                                            roll, activeDemands, activeTotal, ctx.isContour(),
+                                            ctx.pieceGapMm(), ctx.trimStartMm(), perRollSec, deadlineNanos
+                                    );
+                                    List<Integer> placedDemandIds = outcome.placements().stream()
+                                            .map(PlacementSnapshot::demandId)
+                                            .toList();
+                                    return new MultiMaterialRollRelayHelper.RelayTrial<>(
+                                            outcome,
+                                            outcome.rollId(),
+                                            outcome.feasible(),
+                                            outcome.placedCount(),
+                                            outcome.estimatedConsumedAreaMm2(),
+                                            outcome.utilizationPct(),
+                                            placedDemandIds
+                                    );
+                                }
+                        );
+                placedByRoll = relay.placedByRoll();
+                for (MultiMaterialRollRelayHelper.RelayEntry<RollTrialOutcome> entry : relay.entries()) {
+                    List<AllocatedItem> allocated = null;
+                    if (entry.allocatedCounts() != null && !entry.allocatedCounts().isEmpty()) {
+                        allocated = entry.allocatedCounts().entrySet().stream()
+                                .map(e -> {
+                                    NormalizedDemand d = demandById.get(e.getKey());
+                                    return new AllocatedItem(e.getKey(), d != null ? d.name() : ("裁片 #" + e.getKey()), e.getValue());
+                                })
+                                .toList();
+                    }
+                    rollOptions.add(toRollOption(entry.payload(), entry.recommended(), entry.relayOrder(), allocated));
+                }
             } else {
+                List<NormalizedDemand> remainingDemands = currentRemainingDemands(ctx.demands(), remainingQty);
                 List<RollTrialOutcome> trials = new ArrayList<>();
                 for (int idx = 0; idx < ctx.candidateRolls().size(); idx++) {
                     RollSnapshot roll = ctx.candidateRolls().get(idx);
@@ -396,23 +480,7 @@ public class GlobalPlanningService {
                     if (recommended) {
                         placedByRoll = t.placedCount();
                     }
-                    rollOptions.add(new RollOption(
-                            t.rollId(),
-                            round1(t.widthMm()),
-                            round1(t.availableLengthMm()),
-                            round1(t.estimatedCutLengthMm()),
-                            round2(t.utilizationPct()),
-                            t.placedCount(),
-                            t.feasible(),
-                            recommended,
-                            cleanCoord(t.windowStartY()),
-                            round1(t.totalLengthMm()),
-                            t.placements(),
-                            t.defects(),
-                            blankToNull(t.rollModel()),
-                            blankToNull(t.batchNo()),
-                            blankToNull(t.color())
-                    ));
+                    rollOptions.add(toRollOption(t, recommended, null, null));
                 }
             }
         }
@@ -542,7 +610,8 @@ public class GlobalPlanningService {
 
             // 筛选兼容在库母卷
             List<RollSnapshot> candidateRolls = selectCandidateRolls(
-                    tx, task, request.candidateRollIds(), targetModel, reqBatch, reqColor,
+                    tx, task, request.candidateRollIds(), Boolean.TRUE.equals(request.continueAcrossRolls()),
+                    targetModel, reqBatch, reqColor,
                     allRolls, rollMap, lockedRollsByExec, rollOccupiedLen, rollMaxPlannedEndY, warnings
             );
 
@@ -652,6 +721,7 @@ public class GlobalPlanningService {
             CuttingStatePort.ReadView tx,
             CuttingTask task,
             List<String> explicitRollIds,
+            boolean continueAcrossRolls,
             String targetModel,
             String reqBatch,
             String reqColor,
@@ -724,7 +794,18 @@ public class GlobalPlanningService {
             return eligible;
         }
 
-        // 未指定 candidateRollIds 时，按不同门幅去重择优（每个门幅挑出余长最充裕、疵点最少的代表卷）
+        if (continueAcrossRolls) {
+            eligible.sort(Comparator
+                    .comparingInt((RollSnapshot r) -> r.defects().size())
+                    .thenComparing(Comparator.comparingDouble(RollSnapshot::availableLengthMm).reversed())
+                    .thenComparingDouble(RollSnapshot::width)
+                    .thenComparing(RollSnapshot::rollId));
+            return eligible.size() > MAX_RELAY_ROLL_CANDIDATES
+                    ? eligible.subList(0, MAX_RELAY_ROLL_CANDIDATES)
+                    : eligible;
+        }
+
+        // 未指定 candidateRollIds 且非跨卷接力时，按不同门幅去重择优（每个门幅挑出余长最充裕、疵点最少的代表卷）
         Map<Long, List<RollSnapshot>> byWidthBucket = new LinkedHashMap<>();
         for (RollSnapshot r : eligible) {
             long widthKey = Math.round(r.width() * 10.0);
@@ -809,7 +890,7 @@ public class GlobalPlanningService {
         return fitLines * 10.0 + defectBonus + bestWidthFit;
     }
 
-    private record RollTrialOutcome(
+    static record RollTrialOutcome(
             String rollId,
             double widthMm,
             double availableLengthMm,
@@ -826,6 +907,33 @@ public class GlobalPlanningService {
             String batchNo,
             String color
     ) {}
+
+    static RollOption toRollOption(
+            RollTrialOutcome t,
+            boolean recommended,
+            Integer relayOrder,
+            List<AllocatedItem> allocatedItems
+    ) {
+        return new RollOption(
+                t.rollId(),
+                round1(t.widthMm()),
+                round1(t.availableLengthMm()),
+                round1(t.estimatedCutLengthMm()),
+                round2(t.utilizationPct()),
+                t.placedCount(),
+                t.feasible(),
+                recommended,
+                cleanCoord(t.windowStartY()),
+                round1(t.totalLengthMm()),
+                t.placements(),
+                t.defects(),
+                blankToNull(t.rollModel()),
+                blankToNull(t.batchNo()),
+                blankToNull(t.color()),
+                relayOrder,
+                allocatedItems
+        );
+    }
 
     private RollTrialOutcome evaluateRoll(
             RollSnapshot roll,
@@ -1126,7 +1234,7 @@ public class GlobalPlanningService {
 
     // ==================== 辅助方法 ====================
 
-    private static List<NormalizedDemand> currentRemainingDemands(
+    static List<NormalizedDemand> currentRemainingDemands(
             List<NormalizedDemand> base,
             Map<Integer, Integer> remainingQty
     ) {
@@ -1387,7 +1495,7 @@ public class GlobalPlanningService {
         return counts;
     }
 
-    private static int sumValues(Map<?, Integer> map) {
+    static int sumValues(Map<?, Integer> map) {
         int s = 0;
         for (Integer v : map.values()) if (v != null) s += v;
         return s;

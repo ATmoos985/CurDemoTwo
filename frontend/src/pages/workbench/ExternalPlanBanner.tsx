@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatDraftMaterialType, getDraftStatusMeta, type WorkbenchDraftDto } from './draftInboxApi';
 import type { ExternalPlanBannerMeta } from './workbenchDeeplinkUtils';
 
 export interface ExternalPlanBannerProps {
@@ -6,6 +7,9 @@ export interface ExternalPlanBannerProps {
   error?: string | null;
   banner: ExternalPlanBannerMeta | null;
   confirmedSchemeId?: string | null;
+  siblingDrafts?: WorkbenchDraftDto[];
+  onSelectDraft?: (draft: WorkbenchDraftDto) => void;
+  onDiscardDraft?: (draftId: string) => void;
   onDismiss: () => void;
 }
 
@@ -25,6 +29,9 @@ export const ExternalPlanBanner: React.FC<ExternalPlanBannerProps> = ({
   error = null,
   banner,
   confirmedSchemeId = null,
+  siblingDrafts = [],
+  onSelectDraft,
+  onDiscardDraft,
   onDismiss
 }) => {
   if (!loading && !error && !banner) return null;
@@ -85,14 +92,25 @@ export const ExternalPlanBanner: React.FC<ExternalPlanBannerProps> = ({
 
   if (!banner) return null;
 
-  const isConfirmed = Boolean(confirmedSchemeId);
-  const isStaleOrExpired = !isConfirmed && (banner.stale || banner.expired);
-  const hasFailedChecks = !isConfirmed && banner.failedRiskChecks.length > 0;
-  const hasPartialFulfillment = !isConfirmed && banner.fulfillmentStatus !== 'COMPLETE';
+  const effectiveConfirmedId = confirmedSchemeId || banner.confirmedSchemeId;
+  const isConfirmed = Boolean(effectiveConfirmedId) || banner.status === 'CONFIRMED';
+  const isDiscarded = !isConfirmed && banner.status === 'DISCARDED';
+  const isExpiredByTime = Boolean(
+    banner.expiresAt &&
+      Number.isFinite(Date.parse(banner.expiresAt)) &&
+      Date.parse(banner.expiresAt) < Date.now()
+  );
+  const isExpired =
+    !isConfirmed &&
+    !isDiscarded &&
+    (Boolean(banner.expired) || banner.status === 'EXPIRED' || isExpiredByTime);
+  const isStaleOrExpired = !isConfirmed && !isDiscarded && (banner.stale || isExpired);
+  const hasFailedChecks = !isConfirmed && !isDiscarded && banner.failedRiskChecks.length > 0;
+  const hasPartialFulfillment = !isConfirmed && !isDiscarded && banner.fulfillmentStatus !== 'COMPLETE';
 
   const accentColor = isConfirmed
     ? 'var(--ok, #059669)'
-    : isStaleOrExpired
+    : isDiscarded || isStaleOrExpired
     ? 'var(--err, #dc2626)'
     : hasFailedChecks || hasPartialFulfillment
     ? 'var(--warn, #d97706)'
@@ -100,13 +118,13 @@ export const ExternalPlanBanner: React.FC<ExternalPlanBannerProps> = ({
 
   const surfaceBg = isConfirmed
     ? 'var(--ok-bg, rgba(16, 185, 129, 0.12))'
-    : isStaleOrExpired
+    : isDiscarded || isStaleOrExpired
     ? 'var(--err-bg, rgba(220, 38, 38, 0.1))'
     : hasFailedChecks
     ? 'var(--warn-bg, rgba(245, 158, 11, 0.12))'
     : 'var(--panel-2, rgba(2, 132, 199, 0.06))';
 
-  const borderBottomColor = isStaleOrExpired
+  const borderBottomColor = isDiscarded || isStaleOrExpired
     ? 'var(--err, #dc2626)'
     : hasFailedChecks
     ? 'var(--warn, #d97706)'
@@ -123,7 +141,7 @@ export const ExternalPlanBanner: React.FC<ExternalPlanBannerProps> = ({
 
   return (
     <section
-      role={isStaleOrExpired || Boolean(error) ? 'alert' : 'status'}
+      role={isDiscarded || isStaleOrExpired || Boolean(error) ? 'alert' : 'status'}
       aria-label="外部试排方案预览提示"
       data-testid="external-plan-banner"
       style={{
@@ -150,18 +168,21 @@ export const ExternalPlanBanner: React.FC<ExternalPlanBannerProps> = ({
       >
         <strong style={{ fontSize: 12.5, fontWeight: 650 }}>
           {isConfirmed
-            ? `外部试排方案已正式落库（${confirmedSchemeId}）`
+            ? `外部试排方案已正式落库${effectiveConfirmedId ? `（${effectiveConfirmedId}）` : ''}`
+            : isDiscarded
+            ? '外部试排草案已作废（不可确认落库）'
             : '外部试排方案预览（尚未锁库）'}
         </strong>
 
-        {!isConfirmed && banner.expired && <span className="tag err">草案已过期</span>}
-        {!isConfirmed && !banner.expired && banner.stale && (
+        {isDiscarded && <span className="tag err">已作废</span>}
+        {isExpired && <span className="tag err">草案已过期</span>}
+        {!isConfirmed && !isDiscarded && !isExpired && banner.stale && (
           <span className="tag err">库存/需求版本已变化</span>
         )}
-        {!isConfirmed && !banner.expired && !banner.stale && banner.draftId && (
+        {!isConfirmed && !isDiscarded && !isExpired && !banner.stale && banner.draftId && (
           <span className="tag run">待人工确认草案</span>
         )}
-        {!isConfirmed && !banner.draftId && <span className="tag kind">只读预览</span>}
+        {!isConfirmed && !isDiscarded && !isExpired && !banner.draftId && <span className="tag kind">只读预览</span>}
 
         <span className={`tag ${fulfillmentTagClass}`}>{banner.fulfillmentLabel}</span>
 
@@ -179,7 +200,7 @@ export const ExternalPlanBanner: React.FC<ExternalPlanBannerProps> = ({
           {banner.materialLabel}
         </span>
 
-        {expiresAtText && !isConfirmed && (
+        {expiresAtText && !isConfirmed && !isDiscarded && (
           <span className="num" style={{ color: 'var(--cp-ink-3, #64748b)' }}>
             有效期至 {expiresAtText}
           </span>
@@ -187,10 +208,50 @@ export const ExternalPlanBanner: React.FC<ExternalPlanBannerProps> = ({
 
         <span className="sp" />
 
+        {!isConfirmed && !isDiscarded && !isExpired && banner.draftId && onDiscardDraft && (
+          <button
+            type="button"
+            className="btn sm err"
+            onClick={() => onDiscardDraft(banner.draftId!)}
+          >
+            作废草案
+          </button>
+        )}
+
         <button type="button" className="btn sm" onClick={onDismiss}>
           关闭提示
         </button>
       </div>
+
+      {/* 已作废说明条 */}
+      {isDiscarded && (
+        <div
+          role="alert"
+          data-testid="external-plan-discarded-alert"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 8,
+            padding: '5px 9px',
+            borderRadius: 4,
+            background: 'var(--err-bg, rgba(220, 38, 38, 0.14))',
+            border: '1px solid var(--err, #dc2626)',
+            color: 'var(--err, #b91c1c)',
+            fontSize: 12,
+            fontWeight: 550
+          }}
+        >
+          <span>
+            该草案已人工确认作废（仅关闭建议，未扣减库存），禁止直接选定落库；如需继续排产请重新求解。
+          </span>
+          {banner.discardReason && (
+            <span className="num" style={{ fontWeight: 400, color: 'var(--cp-ink, #0f172a)' }}>
+              作废原因：{banner.discardReason}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* 草案过期或库存/需求版本漂移告警条 */}
       {isStaleOrExpired && (
@@ -212,9 +273,9 @@ export const ExternalPlanBanner: React.FC<ExternalPlanBannerProps> = ({
           }}
         >
           <span>
-            {banner.expired && banner.stale
+            {isExpired && banner.stale
               ? '告警：库存或需求版本已变化且草案已过期，建议重新试排后再确认落库。'
-              : banner.expired
+              : isExpired
               ? '告警：该草案已过期，建议重新试排以获取最新有效方案。'
               : '告警：库存或需求版本已变化，草案可能与现场实物不一致，建议重新试排。'}
           </span>
@@ -303,9 +364,37 @@ export const ExternalPlanBanner: React.FC<ExternalPlanBannerProps> = ({
         <span>
           {isConfirmed
             ? '当前方案已完成正式确认并同步需求履约进度，可在右侧或结果管理页查看工单。'
+            : isDiscarded || isExpired
+            ? '当前草案不可再作为有效确认依据，请点击工作台重新试排或从收件箱切换其他待确认草案。'
             : '请核对画布排布、避疵禁区与尺寸无误后，点击右侧「选定此方案」按钮完成正式确认落库（预览不会扣减库存）。'}
         </span>
       </div>
+
+      {/* 同批组多料联排草案快捷切换条 */}
+      {siblingDrafts.length > 1 && onSelectDraft && (
+        <div className="wb-banner-sibling-bar" aria-label="同批联排草案切换">
+          <span className="num" style={{ fontWeight: 600 }}>
+            同批联排草案（{siblingDrafts.length}）：
+          </span>
+          {siblingDrafts.map((sib, idx) => {
+            const sibId = sib.draftId || sib.id;
+            const current = sibId === banner.draftId;
+            const meta = getDraftStatusMeta(sib.status, sib.stale);
+            return (
+              <button
+                key={sibId}
+                type="button"
+                className={`btn sm ${current ? 'pri' : ''}`}
+                onClick={() => onSelectDraft(sib)}
+                data-testid={`banner-sibling-${sibId}`}
+              >
+                #{sib.batchIndex ?? idx + 1} · {formatDraftMaterialType(sib.target?.materialType)}
+                {sib.target?.materialId ? ` ${sib.target.materialId}` : ''} · {meta.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 };

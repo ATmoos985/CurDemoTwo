@@ -482,9 +482,9 @@ test('CLI 参数校验、JSON/MD 输出写文件与真实仓库全量闭环门�
     const parsed = JSON.parse(fs.readFileSync(jsonOut, 'utf8'));
     assert.equal(parsed.summary.passed, true, JSON.stringify(parsed.violations));
     assert.equal(parsed.dimensions.testCoverage.taggedTestClassCount, 19);
-    assert.equal(parsed.dimensions.apiContract.v2EndpointCount, 65);
+    assert.equal(parsed.dimensions.apiContract.v2EndpointCount, 69);
     assert.equal(parsed.dimensions.apiContract.legacyEndpointCount, 36);
-    assert.equal(parsed.dimensions.apiContract.openapiOperationCount, 67);
+    assert.equal(parsed.dimensions.apiContract.openapiOperationCount, 71);
     assert.equal(parsed.dimensions.archAndLargeFiles.totalCycles, 0);
     assert.equal(parsed.dimensions.archAndLargeFiles.currentLargeFileCount, 30);
     assert.equal(parsed.dimensions.verifyMap.knownModernRouteCount, 14);
