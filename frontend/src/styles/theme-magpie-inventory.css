@@ -105,11 +105,27 @@
 .mp-inv-workspace.inv-resizable-workspace {
   flex: 1;
   display: grid;
+  grid-template-columns: minmax(420px, 1fr) 10px var(--inv-preview-w, 384px);
   min-height: 0;
   min-width: 0;
   padding: 0 18px 14px;
   gap: 0;
   background: var(--cp-bg);
+}
+
+.mp-inv-workspace.inv-resizable-workspace:not(.is-resizing) {
+  transition: grid-template-columns var(--cp-dur-panel, 260ms) var(--cp-ease-out-expo, cubic-bezier(0.22, 1, 0.36, 1));
+}
+
+.mp-inv-workspace.inv-resizable-workspace.is-preview-closed {
+  grid-template-columns: minmax(0, 1fr) 0px 0px;
+}
+
+.mp-inv-workspace .inv-split-handle.mp-inv-splitter.is-collapsed {
+  width: 0;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
 }
 
 /* Left Pure-White 12px Aggregated Ledger Card */
@@ -476,6 +492,28 @@
   flex-direction: column;
   min-height: 0;
   min-width: 0;
+  transition:
+    opacity var(--cp-dur-panel, 260ms) var(--cp-ease-out-expo, cubic-bezier(0.22, 1, 0.36, 1)),
+    transform var(--cp-dur-panel, 260ms) var(--cp-ease-out-expo, cubic-bezier(0.22, 1, 0.36, 1)),
+    visibility 0s linear 0s;
+}
+
+.mp-inv-preview-card.inv-preview-pane.is-collapsed {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  border-color: transparent;
+  box-shadow: none;
+  transform: translateX(14px);
+  transition:
+    opacity 0.18s ease,
+    transform var(--cp-dur-panel, 260ms) var(--cp-ease-out-expo, cubic-bezier(0.22, 1, 0.36, 1)),
+    visibility 0s linear var(--cp-dur-panel, 260ms);
+}
+
+.mp-inv-preview-card.inv-preview-pane > .mp-inv-preview-head,
+.mp-inv-preview-card.inv-preview-pane > .inv-preview-body {
+  min-width: var(--inv-preview-w, 384px);
 }
 
 .mp-inv-preview-card .mp-inv-preview-head {
@@ -766,13 +804,20 @@
 
 /* Floating Light-Shell Workspace */
 .mp-insp-workspace {
+  --insp-side-col: 368px;
   flex: 1;
   display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) var(--insp-side-col);
   min-height: 0;
   min-width: 0;
   padding: 10px 12px 12px;
   gap: 10px;
   background: var(--cp-bg);
+  transition: grid-template-columns var(--cp-dur-panel, 260ms) var(--cp-ease-out-expo, cubic-bezier(0.22, 1, 0.36, 1));
+}
+
+.mp-insp-workspace.is-panel-collapsed {
+  --insp-side-col: 0px;
 }
 
 .mp-insp-track-card {
@@ -885,6 +930,30 @@
   border-radius: var(--cp-radius-card);
   box-shadow: var(--cp-shadow-card);
   overflow: hidden;
+  transition:
+    opacity var(--cp-dur-panel, 260ms) var(--cp-ease-out-expo, cubic-bezier(0.22, 1, 0.36, 1)),
+    transform var(--cp-dur-panel, 260ms) var(--cp-ease-out-expo, cubic-bezier(0.22, 1, 0.36, 1)),
+    margin var(--cp-dur-panel, 260ms) var(--cp-ease-out-expo, cubic-bezier(0.22, 1, 0.36, 1)),
+    visibility 0s linear 0s;
+}
+
+.mp-insp-side-card > .pane-h,
+.mp-insp-side-card > .pane-b {
+  min-width: 368px;
+}
+
+.mp-insp-side-card.is-collapsed {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  box-shadow: none;
+  margin-left: -10px;
+  transform: translateX(14px);
+  transition:
+    opacity 0.18s ease,
+    transform var(--cp-dur-panel, 260ms) var(--cp-ease-out-expo, cubic-bezier(0.22, 1, 0.36, 1)),
+    margin var(--cp-dur-panel, 260ms) var(--cp-ease-out-expo, cubic-bezier(0.22, 1, 0.36, 1)),
+    visibility 0s linear var(--cp-dur-panel, 260ms);
 }
 
 .mp-insp-side-card .pane-h {

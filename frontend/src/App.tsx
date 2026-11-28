@@ -621,26 +621,23 @@ export const App: React.FC = () => {
         aria-label={navCollapsed ? '展开左侧导航' : '收起左侧导航'}
         title={navCollapsed ? '展开左侧导航' : '收起左侧导航'}
       >
-        <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true">
-          {navCollapsed ? (
-            <path
-              d="M3.5 2 6.8 5 3.5 8"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.45"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          ) : (
-            <path
-              d="M6.5 2 3.2 5 6.5 8"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.45"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          )}
+        <svg
+          viewBox="0 0 10 10"
+          width="10"
+          height="10"
+          aria-hidden="true"
+          style={{
+            transform: navCollapsed ? 'rotate(180deg)' : 'rotate(0deg)'
+          }}
+        >
+          <path
+            d="M6.5 2 3.2 5 6.5 8"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.45"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
         </svg>
       </button>
 

@@ -1,8 +1,23 @@
 import type { MutableRefObject } from 'react';
 import type { BoardPoint } from './canvasTypes';
+import type { CameraState } from './canvasGeometry';
 import { drawScreenRulers, RULER_THICKNESS } from './canvasRuler';
 import type { BoardCanvasLiveProps, BoardCanvasRefs } from './canvasKonvaHelpers';
 import { renderOverlay, syncCulledPieces, updateFeedLineVisual } from './canvasDynamicOverlay';
+import {
+  type CameraPoint,
+  DEFAULT_CAMERA_TWEEN_MS,
+  clampCameraScale,
+  computeStraightZoomTweenState,
+  computeWheelZoomFactor,
+  computeZoomCameraAroundPoint,
+  prefersReducedMotion,
+  stepExponentialZoomDamp
+} from './canvasCameraMotion';
+
+export interface CameraMotionOptions {
+  immediate?: boolean;
+}
 
 export interface CameraController {
   getRollWorldRect: () => { x: number; y: number; width: number; height: number };
@@ -12,12 +27,20 @@ export interface CameraController {
   scheduleRulerDraw: () => void;
   applyCameraImmediate: () => void;
   scheduleCameraApply: () => void;
-  fitView: () => void;
-  focusRange: (startY: number, endY: number, startX?: number, endX?: number) => void;
+  cancelAnimation: () => void;
+  fitView: (opts?: CameraMotionOptions) => void;
+  focusRange: (
+    startY: number,
+    endY: number,
+    startX?: number,
+    endX?: number,
+    opts?: CameraMotionOptions
+  ) => void;
   followPosition: (yMm: number) => void;
   clearMeasure: () => void;
-  zoomBy: (factor: number, centerPx?: { x: number; y: number }) => void;
-  resetRollOffset: () => void;
+  zoomBy: (factor: number, centerPx?: CameraPoint, opts?: CameraMotionOptions) => void;
+  zoomWheel: (deltaY: number, deltaMode: number, ctrlKey: boolean, centerPx?: CameraPoint) => void;
+  resetRollOffset: (opts?: CameraMotionOptions) => void;
 }
 
 export function createCameraController(
@@ -102,6 +125,33 @@ export function createCameraController(
     });
   };
 
+  let lastReportedZoomPct = -1;
+  let animRafId: number | null = null;
+  let animMode: 'none' | 'tween' | 'wheel' | 'follow' = 'none';
+  let tweenFrom: CameraState | null = null;
+  let tweenTo: CameraState | null = null;
+  let tweenAnchor: CameraPoint | null = null;
+  let tweenStartTs = 0;
+  let tweenDurationMs = DEFAULT_CAMERA_TWEEN_MS;
+  let wheelTarget: CameraState | null = null;
+  let wheelAnchor: CameraPoint | null = null;
+  let followTarget: { x: number; y: number } | null = null;
+  let lastFrameTs = 0;
+
+  const cancelAnimation = () => {
+    if (animRafId != null) {
+      window.cancelAnimationFrame(animRafId);
+      animRafId = null;
+    }
+    animMode = 'none';
+    tweenFrom = null;
+    tweenTo = null;
+    tweenAnchor = null;
+    wheelTarget = null;
+    wheelAnchor = null;
+    followTarget = null;
+  };
+
   const applyCameraImmediate = () => {
     const worldGroups = refs.worldGroupsRef.current;
     if (!worldGroups.length) return;
@@ -126,7 +176,11 @@ export function createCameraController(
 
     const relPct =
       c.fitScale > 0 ? Math.round((c.scale / c.fitScale) * 100) : Math.round(c.scale * 400);
-    setZoomPct(Math.max(10, Math.min(999, relPct)));
+    const clampedPct = Math.max(10, Math.min(999, relPct));
+    if (clampedPct !== lastReportedZoomPct) {
+      lastReportedZoomPct = clampedPct;
+      setZoomPct(clampedPct);
+    }
   };
 
   const scheduleCameraApply = () => {
@@ -137,7 +191,101 @@ export function createCameraController(
     });
   };
 
-  const fitView = () => {
+  const runAnimLoop = () => {
+    if (animRafId != null) return;
+    lastFrameTs = performance.now();
+    const tick = (now: number) => {
+      animRafId = null;
+      const dtMs = Math.max(1, now - lastFrameTs);
+      lastFrameTs = now;
+
+      if (animMode === 'tween' && tweenFrom && tweenTo) {
+        const progress = tweenDurationMs > 0 ? (now - tweenStartTs) / tweenDurationMs : 1;
+        if (progress >= 1) {
+          refs.camRef.current = { ...tweenTo };
+          cancelAnimation();
+          applyCameraImmediate();
+          return;
+        }
+        refs.camRef.current = computeStraightZoomTweenState(
+          tweenFrom,
+          tweenTo,
+          progress,
+          tweenAnchor
+        );
+        applyCameraImmediate();
+        animRafId = window.requestAnimationFrame(tick);
+        return;
+      }
+
+      if (animMode === 'wheel' && wheelTarget && wheelAnchor) {
+        const { next, done } = stepExponentialZoomDamp(
+          refs.camRef.current,
+          wheelTarget,
+          dtMs,
+          wheelAnchor
+        );
+        refs.camRef.current = next;
+        applyCameraImmediate();
+        if (done) {
+          cancelAnimation();
+          return;
+        }
+        animRafId = window.requestAnimationFrame(tick);
+        return;
+      }
+
+      if (animMode === 'follow' && followTarget) {
+        const cur = refs.camRef.current;
+        const alpha = 1 - Math.exp((-14 * Math.min(dtMs, 64)) / 1000);
+        const dx = followTarget.x - cur.x;
+        const dy = followTarget.y - cur.y;
+        if (Math.hypot(dx, dy) < 0.35) {
+          refs.camRef.current = { ...cur, x: followTarget.x, y: followTarget.y };
+          cancelAnimation();
+          applyCameraImmediate();
+          return;
+        }
+        refs.camRef.current = {
+          ...cur,
+          x: cur.x + dx * alpha,
+          y: cur.y + dy * alpha
+        };
+        applyCameraImmediate();
+        animRafId = window.requestAnimationFrame(tick);
+      }
+    };
+    animRafId = window.requestAnimationFrame(tick);
+  };
+
+  const startTween = (
+    targetCam: CameraState,
+    anchorPx: CameraPoint | null,
+    durationMs = DEFAULT_CAMERA_TWEEN_MS,
+    opts?: CameraMotionOptions
+  ) => {
+    const cur = refs.camRef.current;
+    const nearPos =
+      Math.abs(targetCam.x - cur.x) < 0.4 && Math.abs(targetCam.y - cur.y) < 0.4;
+    const nearScale =
+      Math.abs(targetCam.scale - cur.scale) / Math.max(targetCam.scale, 1e-6) < 0.001;
+    if (opts?.immediate || prefersReducedMotion() || (nearPos && nearScale)) {
+      cancelAnimation();
+      refs.camRef.current = { ...targetCam };
+      applyCameraImmediate();
+      return;
+    }
+    cancelAnimation();
+    animMode = 'tween';
+    tweenFrom = { ...cur };
+    tweenTo = { ...targetCam };
+    tweenAnchor = anchorPx ? { ...anchorPx } : null;
+    tweenStartTs = performance.now();
+    tweenDurationMs = durationMs;
+    runAnimLoop();
+  };
+
+  const fitView = (opts?: CameraMotionOptions) => {
     const host = refs.hostRef.current;
     const stage = refs.stageRef.current;
     if (!host || !stage) return;
@@ -178,11 +326,16 @@ export function createCameraController(
     const x = padLeft + (vw - padLeft - padRight - worldW * scale) / 2 - minX * scale;
     const y = padTop + (vh - padTop - padBottom - worldH * scale) / 2 - minY * scale;
 
-    refs.camRef.current = { x, y, scale, fitScale: scale };
-    applyCameraImmediate();
+    startTween({ x, y, scale, fitScale: scale }, null, 260, opts);
   };
 
-  const focusRange = (startY: number, endY: number, startX?: number, endX?: number) => {
+  const focusRange = (
+    startY: number,
+    endY: number,
+    startX?: number,
+    endX?: number,
+    opts?: CameraMotionOptions
+  ) => {
     const host = refs.hostRef.current;
     const stage = refs.stageRef.current;
     if (!host || !stage) return;
@@ -230,8 +383,7 @@ export function createCameraController(
     const x = padLeft + (vw - padLeft - padRight - worldW * scale) / 2 - minX * scale;
     const y = padTop + (vh - padTop - padBottom - worldH * scale) / 2 - minY * scale;
 
-    refs.camRef.current = { x, y, scale, fitScale: scale };
-    applyCameraImmediate();
+    startTween({ x, y, scale, fitScale: scale }, null, 260, opts);
   };
 
   const followPosition = (yMm: number) => {
@@ -267,18 +419,30 @@ export function createCameraController(
 
     const ro = refs.rollOffsetRef.current;
     const rulerPad = p.showDimensions ? RULER_THICKNESS : 0;
+    let nextX = cur.x;
+    let nextY = cur.y;
     if (p.vertical) {
       const targetScreenY = rulerPad + (vh - rulerPad) * 0.5;
-      const nextCamY = targetScreenY - (ro.y + yMm) * cur.scale;
-      if (Math.abs(nextCamY - cur.y) < 0.5) return;
-      refs.camRef.current = { ...cur, y: nextCamY };
+      nextY = targetScreenY - (ro.y + yMm) * cur.scale;
     } else {
       const targetScreenX = rulerPad + (vw - rulerPad) * 0.5;
-      const nextCamX = targetScreenX - (ro.x + yMm) * cur.scale;
-      if (Math.abs(nextCamX - cur.x) < 0.5) return;
-      refs.camRef.current = { ...cur, x: nextCamX };
+      nextX = targetScreenX - (ro.x + yMm) * cur.scale;
     }
-    scheduleCameraApply();
+    if (Math.hypot(nextX - cur.x, nextY - cur.y) < 0.5) return;
+
+    if (prefersReducedMotion()) {
+      cancelAnimation();
+      refs.camRef.current = { ...cur, x: nextX, y: nextY };
+      scheduleCameraApply();
+      return;
+    }
+
+    if (animMode !== 'follow') {
+      cancelAnimation();
+      animMode = 'follow';
+    }
+    followTarget = { x: nextX, y: nextY };
+    runAnimLoop();
   };
 
   const clearMeasure = () => {
@@ -286,28 +450,61 @@ export function createCameraController(
     renderOverlay(refs, propsRef);
   };
 
-  const zoomBy = (factor: number, centerPx?: { x: number; y: number }) => {
+  const zoomBy = (factor: number, centerPx?: CameraPoint, opts?: CameraMotionOptions) => {
     const host = refs.hostRef.current;
     if (!host) return;
-    const cx = centerPx ? centerPx.x : host.clientWidth / 2;
-    const cy = centerPx ? centerPx.y : host.clientHeight / 2;
-    const c = refs.camRef.current;
-    const nextScale = Math.max(0.002, Math.min(5.0, c.scale * factor));
-    const worldX = (cx - c.x) / c.scale;
-    const worldY = (cy - c.y) / c.scale;
-    refs.camRef.current = {
-      ...c,
-      scale: nextScale,
-      x: cx - worldX * nextScale,
-      y: cy - worldY * nextScale
-    };
-    scheduleCameraApply();
+    const anchor = centerPx ?? { x: host.clientWidth / 2, y: host.clientHeight / 2 };
+    const baseCam =
+      animMode === 'tween' && tweenTo
+        ? tweenTo
+        : animMode === 'wheel' && wheelTarget
+        ? wheelTarget
+        : refs.camRef.current;
+    const targetScale = clampCameraScale(baseCam.scale * factor);
+    const targetCam = computeZoomCameraAroundPoint(refs.camRef.current, targetScale, anchor);
+    startTween(targetCam, anchor, 200, opts);
   };
 
-  const resetRollOffset = () => {
+  const zoomWheel = (
+    deltaY: number,
+    deltaMode: number,
+    ctrlKey: boolean,
+    centerPx?: CameraPoint
+  ) => {
+    const host = refs.hostRef.current;
+    if (!host) return;
+    const factor = computeWheelZoomFactor(deltaY, deltaMode, ctrlKey);
+    if (factor === 1) return;
+    const anchor = centerPx ?? { x: host.clientWidth / 2, y: host.clientHeight / 2 };
+
+    if (prefersReducedMotion()) {
+      cancelAnimation();
+      const targetScale = clampCameraScale(refs.camRef.current.scale * factor);
+      refs.camRef.current = computeZoomCameraAroundPoint(refs.camRef.current, targetScale, anchor);
+      scheduleCameraApply();
+      return;
+    }
+
+    const baseScale =
+      animMode === 'wheel' && wheelTarget
+        ? wheelTarget.scale
+        : animMode === 'tween' && tweenTo
+        ? tweenTo.scale
+        : refs.camRef.current.scale;
+    const nextTargetScale = clampCameraScale(baseScale * factor);
+    if (animMode !== 'wheel') {
+      cancelAnimation();
+      animMode = 'wheel';
+    }
+    wheelAnchor = { ...anchor };
+    wheelTarget = computeZoomCameraAroundPoint(refs.camRef.current, nextTargetScale, anchor);
+    runAnimLoop();
+  };
+
+  const resetRollOffset = (opts?: CameraMotionOptions) => {
     refs.rollOffsetRef.current = { x: 0, y: 0 };
     syncAllRollGroupsTransform();
-    fitView();
+    fitView(opts);
   };
 
   return {
@@ -318,11 +515,13 @@ export function createCameraController(
     scheduleRulerDraw,
     applyCameraImmediate,
     scheduleCameraApply,
+    cancelAnimation,
     fitView,
     focusRange,
     followPosition,
     clearMeasure,
     zoomBy,
+    zoomWheel,
     resetRollOffset
   };
 }

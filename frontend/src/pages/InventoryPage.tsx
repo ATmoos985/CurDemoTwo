@@ -700,10 +700,12 @@ export const InventoryPage: React.FC<{
       ) : (
         <div
           ref={layoutContainerRef}
-          className={`inv-resizable-workspace mp-inv-workspace ${draggingRight ? 'is-resizing' : ''}`}
+          className={`inv-resizable-workspace mp-inv-workspace ${draggingRight ? 'is-resizing' : ''} ${
+            !previewOpen ? 'is-preview-closed' : ''
+          }`}
           style={{
-            gridTemplateColumns: previewOpen ? `minmax(420px, 1fr) 10px ${previewWidth}px` : 'minmax(0, 1fr)'
-          }}
+            '--inv-preview-w': `${previewWidth}px`
+          } as React.CSSProperties}
         >
           <InventoryLedgerPanel
             filteredProducts={filteredProducts}
@@ -740,56 +742,55 @@ export const InventoryPage: React.FC<{
             }}
           />
 
-          {previewOpen && (
-            <InventoryPreviewPane
-              previewWidth={previewWidth}
-              draggingRight={draggingRight}
-              dragOriginRef={dragOriginRef}
-              onSetDraggingRight={setDraggingRight}
-              onCommitPreviewWidth={commitPreviewWidth}
-              onAnnounceResize={announceResize}
-              onClosePreview={() => setPreviewOpen(false)}
-              previewRoll={previewRoll}
-              previewRemnant={previewRemnant}
-              previewScene={previewScene}
-              rollSpatialMap={rollSpatialMap}
-              rolls={rolls}
-              activeProduct={activeProduct}
-              rollLayout={rollLayout}
-              onSetRollLayout={setRollLayout}
-              vertical={vertical}
-              onToggleVertical={() => setVertical((v) => !v)}
-              tool={tool}
-              onToggleTool={() => setTool((t) => (t === 'measure' ? 'pan' : 'measure'))}
-              cursor={cursor}
-              onCursorMove={setCursor}
-              previewCanvasRef={previewCanvasRef}
-              onInspectRoll={handleInspectRoll}
-              onOpenAction={openActionPanel}
-              onZoomToSpan={handleZoomToSpan}
-              onZoomToDefect={handleZoomToDefect}
-              onSendRollToWorkbench={(roll) => {
-                setCanvasSpec({
-                  canvasMode: 'STOCK_ROLL',
-                  selectedRollId: roll.rollId,
-                  canvasWidthMm: roll.width,
-                  materialModel2D: roll.rollModel
-                });
-                location.hash = '#/workbench';
-              }}
-              onSendRemnantToWorkbench={(rem) => {
-                setCanvasSpec({
-                  canvasMode: 'REMNANT',
-                  selectedRemnantId: rem.id,
-                  canvasWidthMm: rem.width,
-                  canvasLengthMm: rem.length,
-                  materialModel2D: rem.materialBatch || activeProduct?.modelKey || 'REMNANT'
-                });
-                toast(`已选定在库料头 ${rem.id} (${rem.width}×${rem.length}mm) 进入搭切工作台`);
-                location.hash = '#/workbench';
-              }}
-            />
-          )}
+          <InventoryPreviewPane
+            previewOpen={previewOpen}
+            previewWidth={previewWidth}
+            draggingRight={draggingRight}
+            dragOriginRef={dragOriginRef}
+            onSetDraggingRight={setDraggingRight}
+            onCommitPreviewWidth={commitPreviewWidth}
+            onAnnounceResize={announceResize}
+            onClosePreview={() => setPreviewOpen(false)}
+            previewRoll={previewRoll}
+            previewRemnant={previewRemnant}
+            previewScene={previewScene}
+            rollSpatialMap={rollSpatialMap}
+            rolls={rolls}
+            activeProduct={activeProduct}
+            rollLayout={rollLayout}
+            onSetRollLayout={setRollLayout}
+            vertical={vertical}
+            onToggleVertical={() => setVertical((v) => !v)}
+            tool={tool}
+            onToggleTool={() => setTool((t) => (t === 'measure' ? 'pan' : 'measure'))}
+            cursor={cursor}
+            onCursorMove={setCursor}
+            previewCanvasRef={previewCanvasRef}
+            onInspectRoll={handleInspectRoll}
+            onOpenAction={openActionPanel}
+            onZoomToSpan={handleZoomToSpan}
+            onZoomToDefect={handleZoomToDefect}
+            onSendRollToWorkbench={(roll) => {
+              setCanvasSpec({
+                canvasMode: 'STOCK_ROLL',
+                selectedRollId: roll.rollId,
+                canvasWidthMm: roll.width,
+                materialModel2D: roll.rollModel
+              });
+              location.hash = '#/workbench';
+            }}
+            onSendRemnantToWorkbench={(rem) => {
+              setCanvasSpec({
+                canvasMode: 'REMNANT',
+                selectedRemnantId: rem.id,
+                canvasWidthMm: rem.width,
+                canvasLengthMm: rem.length,
+                materialModel2D: rem.materialBatch || activeProduct?.modelKey || 'REMNANT'
+              });
+              toast(`已选定在库料头 ${rem.id} (${rem.width}×${rem.length}mm) 进入搭切工作台`);
+              location.hash = '#/workbench';
+            }}
+          />
         </div>
       )}
 

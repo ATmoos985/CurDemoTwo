@@ -138,6 +138,7 @@ export function mountWorkbenchStage(
       if (activeTouchPointers.size === 2) {
         panState = null;
         activeToolDrag = null;
+        cam.cancelAnimation();
         const pts = Array.from(activeTouchPointers.values());
         pinchState = {
           dist: Math.max(1, Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y)),
@@ -190,6 +191,7 @@ export function mountWorkbenchStage(
         propsRef.current.onSelectLeftover?.(null);
       }
       if (isLeft || isMiddle) {
+        cam.cancelAnimation();
         panState = {
           pointerId: evt.pointerId,
           startX: evt.clientX,
@@ -345,8 +347,12 @@ export function mountWorkbenchStage(
     e.evt.preventDefault();
     propsRef.current.onInteract?.();
     const pt = stage.getPointerPosition();
-    const factor = e.evt.deltaY < 0 ? 1.12 : 1 / 1.12;
-    cam.zoomBy(factor, pt || undefined);
+    cam.zoomWheel(
+      e.evt.deltaY,
+      e.evt.deltaMode || 0,
+      Boolean(e.evt.ctrlKey || e.evt.metaKey),
+      pt || undefined
+    );
   });
 
   const ro = new ResizeObserver(() => {
@@ -356,7 +362,7 @@ export function mountWorkbenchStage(
       stage.size({ width: w, height: h });
       if (!refs.didInitialFitRef.current) {
         refs.didInitialFitRef.current = true;
-        cam.fitView();
+        cam.fitView({ immediate: true });
       } else {
         cam.scheduleCameraApply();
       }
@@ -366,6 +372,7 @@ export function mountWorkbenchStage(
 
   return () => {
     ro.disconnect();
+    cam.cancelAnimation();
     if (refs.rafCamIdRef.current != null) window.cancelAnimationFrame(refs.rafCamIdRef.current);
     if (refs.rafRulerIdRef.current != null) window.cancelAnimationFrame(refs.rafRulerIdRef.current);
     host.removeEventListener('pointerdown', onHostPointerDown);

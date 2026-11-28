@@ -5,6 +5,7 @@ import type {
   ShapeGeometry
 } from '../../store/studioTypes';
 import { NumberInput } from '../../components/ui/NumberInput';
+import { CollapseLeftIcon } from '../../components/ui/LayoutIcons';
 import { DemandRowView, OverviewStats } from './workbenchTypes';
 
 const DemandShapeThumb: React.FC<{
@@ -61,6 +62,8 @@ const DemandShapeThumb: React.FC<{
 
 export interface WorkbenchDemandSidebarProps {
   leftPaneRef: RefObject<HTMLElement | null>;
+  collapsed?: boolean;
+  onCollapse?: () => void;
   is2D: boolean;
   demandSourceTab: 'POOL' | 'TEMPLATE';
   setDemandSourceTab: (tab: 'POOL' | 'TEMPLATE') => void;
@@ -89,6 +92,8 @@ export interface WorkbenchDemandSidebarProps {
 
 export const WorkbenchDemandSidebar: React.FC<WorkbenchDemandSidebarProps> = ({
   leftPaneRef,
+  collapsed = false,
+  onCollapse,
   is2D,
   demandSourceTab,
   setDemandSourceTab,
@@ -115,16 +120,32 @@ export const WorkbenchDemandSidebar: React.FC<WorkbenchDemandSidebarProps> = ({
   onAddBlankDemand
 }) => {
   return (
-    <section ref={leftPaneRef} className="pane studio-left">
+    <section
+      ref={leftPaneRef}
+      className={`pane studio-left ${collapsed ? 'is-collapsed' : ''}`}
+      aria-hidden={collapsed || undefined}
+    >
       <div className="pane-h">
         <span>需求</span>
         <span className="sp" />
-        <a href="#/demands" className="link-btn">
+        <a href="#/demands" className="link-btn" tabIndex={collapsed ? -1 : undefined}>
           ＋ 新建
         </a>
-        <a href="#/demand-library" className="link-btn">
+        <a href="#/demand-library" className="link-btn" tabIndex={collapsed ? -1 : undefined}>
           需求库
         </a>
+        {onCollapse && (
+          <button
+            type="button"
+            className="wb-pane-collapse-btn"
+            onClick={onCollapse}
+            aria-label="收起需求栏"
+            title="收起需求栏 (Alt+[)"
+            tabIndex={collapsed ? -1 : undefined}
+          >
+            <CollapseLeftIcon />
+          </button>
+        )}
       </div>
 
       <div className="pane-b">

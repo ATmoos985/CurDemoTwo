@@ -1,9 +1,11 @@
 import React from 'react';
 import { fmtM, fmtN } from '../../lib/core/util.js';
 import { CadCanvasView } from '../../components/CadCanvasView';
+import { CollapseRightIcon } from '../../components/ui/LayoutIcons';
 import { InventoryActionKind, ProductGroup, RollPreviewLayout } from './inventoryTypes';
 
 export interface InventoryPreviewPaneProps {
+  previewOpen: boolean;
   previewWidth: number;
   draggingRight: boolean;
   dragOriginRef: React.MutableRefObject<{ startX: number; startW: number }>;
@@ -35,6 +37,7 @@ export interface InventoryPreviewPaneProps {
 }
 
 export const InventoryPreviewPane: React.FC<InventoryPreviewPaneProps> = ({
+  previewOpen,
   previewWidth,
   draggingRight,
   dragOriginRef,
@@ -67,7 +70,11 @@ export const InventoryPreviewPane: React.FC<InventoryPreviewPaneProps> = ({
     <>
       <button
         type="button"
-        className={`inv-split-handle mp-inv-splitter ${draggingRight ? 'dragging' : ''}`}
+        className={`inv-split-handle mp-inv-splitter ${draggingRight ? 'dragging' : ''} ${
+          !previewOpen ? 'is-collapsed' : ''
+        }`}
+        aria-hidden={!previewOpen || undefined}
+        tabIndex={!previewOpen ? -1 : undefined}
         aria-label="左右拖动或按左右方向键调节右侧实物预览区宽度"
         title="左右拖动调节预览区宽度（双击切换标准/宽屏，或按方向键）"
         onPointerDown={(e) => {
@@ -108,7 +115,11 @@ export const InventoryPreviewPane: React.FC<InventoryPreviewPaneProps> = ({
         }}
       />
 
-      <aside className="inv-preview-pane mp-inv-preview-card" aria-label="实物几何与疵点预览">
+      <aside
+        className={`inv-preview-pane mp-inv-preview-card ${!previewOpen ? 'is-collapsed' : ''}`}
+        aria-label="实物几何与疵点预览"
+        aria-hidden={!previewOpen || undefined}
+      >
         <div className="mp-inv-preview-head">
           {previewRoll ? (
             <>
@@ -180,15 +191,16 @@ export const InventoryPreviewPane: React.FC<InventoryPreviewPaneProps> = ({
           </button>
           <button
             type="button"
-            className="mp-dark-btn"
+            className="wb-pane-collapse-btn"
             aria-label="收起右侧预览窗格"
             title="收起预览"
+            tabIndex={!previewOpen ? -1 : undefined}
             onClick={() => {
               onClosePreview();
               onAnnounceResize('右侧实物预览窗格已收起');
             }}
           >
-            收起
+            <CollapseRightIcon />
           </button>
         </div>
 

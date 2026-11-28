@@ -134,9 +134,15 @@
 }
 
 :root[data-theme="dark"] .wb-board-zoom-pill {
-  background: rgba(15, 23, 42, 0.88);
+  background: rgba(15, 23, 42, 0.86);
   border-color: rgba(148, 163, 184, 0.24);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.42);
   color: #cbd5e1;
+}
+
+:root[data-theme="dark"] .wb-board-zoom-pill button:hover {
+  background: rgba(148, 163, 184, 0.16);
+  color: #f8fafc;
 }
 
 /* 工作台 V2 暗色覆盖（消除硬编码 #ffffff 与 #f8f9fb） */
@@ -660,6 +666,35 @@
 :root[data-theme="dark"] .mp-cost-card-head {
   background: var(--cp-surface);
   border-color: var(--cp-divider);
+}
+
+/* 侧栏本位收折、边缘召回与专注画布按钮暗色覆盖 */
+:root[data-theme="dark"] .wb-pane-collapse-btn {
+  color: #94a3b8;
+}
+
+:root[data-theme="dark"] .wb-pane-collapse-btn:hover {
+  background: rgba(148, 163, 184, 0.14);
+  color: #f8fafc;
+}
+
+:root[data-theme="dark"] .wb-edge-recall-btn {
+  background: rgba(15, 23, 42, 0.86);
+  border-color: rgba(148, 163, 184, 0.24);
+  color: #e2e8f0;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.42);
+}
+
+:root[data-theme="dark"] .wb-edge-recall-btn:hover {
+  background: #1e293b;
+  border-color: rgba(56, 189, 248, 0.45);
+  color: #ffffff;
+}
+
+:root[data-theme="dark"] .studio-2d-page.wb-v2 .wb-focus-btn.on {
+  background: rgba(56, 189, 248, 0.16);
+  border-color: rgba(56, 189, 248, 0.45);
+  color: #7dd3fc;
 }
 
 :root[data-theme="dark"] .mp-cost-cfg-toggle.on {

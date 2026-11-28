@@ -17,10 +17,13 @@ import {
   SolverStrategyDef
 } from './workbenchTypes';
 import { openEngineSettings } from './workbenchUtils';
+import { CollapseRightIcon } from '../../components/ui/LayoutIcons';
 import { SlittingConfigCard } from './SlittingConfigCard';
 
 export interface WorkbenchRightPanelProps {
   rightPaneRef: RefObject<HTMLElement | null>;
+  collapsed?: boolean;
+  onCollapse?: () => void;
   is2D: boolean;
   schemes2D: SavedScheme2D[];
   activeScheme2D: SavedScheme2D | null;
@@ -90,6 +93,8 @@ export interface WorkbenchRightPanelProps {
 
 export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
   rightPaneRef,
+  collapsed = false,
+  onCollapse,
   is2D,
   schemes2D,
   activeScheme2D,
@@ -153,12 +158,28 @@ export const WorkbenchRightPanel: React.FC<WorkbenchRightPanelProps> = ({
     is2D && (Boolean(multiMaterialSummary) || multiSchemes2D.length > 0);
 
   return (
-    <section ref={rightPaneRef} className="pane studio-right">
+    <section
+      ref={rightPaneRef}
+      className={`pane studio-right ${collapsed ? 'is-collapsed' : ''}`}
+      aria-hidden={collapsed || undefined}
+    >
       <div className="pane-h">
         <span>{canvasMode === 'MULTI_MATERIAL' ? '联排方案' : '方案'}</span>
         <span className="sp" />
         {is2D && schemes2D.length > 0 && (
           <span className="tag kind num">{schemes2D.length} 套</span>
+        )}
+        {onCollapse && (
+          <button
+            type="button"
+            className="wb-pane-collapse-btn"
+            onClick={onCollapse}
+            aria-label="收起方案栏"
+            title="收起方案栏 (Alt+])"
+            tabIndex={collapsed ? -1 : undefined}
+          >
+            <CollapseRightIcon />
+          </button>
         )}
       </div>
 

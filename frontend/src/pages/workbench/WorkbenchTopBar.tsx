@@ -2,6 +2,7 @@ import React, { RefObject } from 'react';
 import type { CanvasMode2D, Scenario2DType } from '../../store/studioTypes';
 import { SlittingWidthMode } from '../../store/studioSettings';
 import { NumberInput } from '../../components/ui/NumberInput';
+import { FocusCanvasIcon } from '../../components/ui/LayoutIcons';
 import { fmtM } from '../../lib/core/util.js';
 import { openCraftSettings } from './workbenchUtils';
 import {
@@ -18,11 +19,9 @@ export interface WorkbenchTopBarProps {
   rightPaneRef: RefObject<HTMLElement | null>;
   stripRef: RefObject<HTMLDivElement | null>;
 
-  // 侧栏一键折叠（平板/窄屏适配） & 草案收件箱入口
-  leftCollapsed: boolean;
-  rightCollapsed: boolean;
-  onToggleLeftPane: () => void;
-  onToggleRightPane: () => void;
+  // 专注画布一键切换 & 草案收件箱入口
+  isCanvasFocused: boolean;
+  onToggleFocusCanvas: () => void;
   pendingDraftCount?: number;
   onOpenDraftInbox?: () => void;
 
@@ -73,10 +72,8 @@ export const WorkbenchTopBar: React.FC<WorkbenchTopBarProps> = ({
   leftPaneRef,
   rightPaneRef,
   stripRef,
-  leftCollapsed,
-  rightCollapsed,
-  onToggleLeftPane,
-  onToggleRightPane,
+  isCanvasFocused,
+  onToggleFocusCanvas,
   pendingDraftCount = 0,
   onOpenDraftInbox,
   canvasMode,
@@ -743,27 +740,18 @@ export const WorkbenchTopBar: React.FC<WorkbenchTopBarProps> = ({
         </button>
       )}
 
-      {/* 工业平板/窄屏快速收折左右侧栏按钮 */}
-      <div className="wb-pane-toggles" role="group" aria-label="侧栏收折控制">
-        <button
-          type="button"
-          className={`btn sm ${leftCollapsed ? 'on' : ''}`}
-          aria-pressed={!leftCollapsed}
-          title={leftCollapsed ? '展开左侧需求栏' : '收起左侧需求栏'}
-          onClick={onToggleLeftPane}
-        >
-          {leftCollapsed ? '▶ 需求' : '◀ 需求'}
-        </button>
-        <button
-          type="button"
-          className={`btn sm ${rightCollapsed ? 'on' : ''}`}
-          aria-pressed={!rightCollapsed}
-          title={rightCollapsed ? '展开右侧方案栏' : '收起右侧方案栏'}
-          onClick={onToggleRightPane}
-        >
-          {rightCollapsed ? '方案 ◀' : '方案 ▶'}
-        </button>
-      </div>
+      {/* 极简专注画布切换：一键收起/恢复左右侧栏 (Alt+\) */}
+      <button
+        type="button"
+        className={`btn sm wb-focus-btn ${isCanvasFocused ? 'on' : ''}`}
+        aria-pressed={isCanvasFocused}
+        aria-label={isCanvasFocused ? '恢复左右侧栏' : '专注画布（收起左右侧栏）'}
+        title={isCanvasFocused ? '恢复左右侧栏 (Alt+\\)' : '收起左右侧栏专注画布 (Alt+\\)'}
+        onClick={onToggleFocusCanvas}
+      >
+        <FocusCanvasIcon active={isCanvasFocused} />
+        <span>{isCanvasFocused ? '恢复面板' : '专注画布'}</span>
+      </button>
     </div>
   );
 };

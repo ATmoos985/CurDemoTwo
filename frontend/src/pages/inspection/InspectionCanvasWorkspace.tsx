@@ -8,6 +8,7 @@ import {
   WorkbenchBoardHandle
 } from '../../components/WorkbenchBoardCanvas';
 import { NumberInput } from '../../components/ui/NumberInput';
+import { CollapseRightIcon } from '../../components/ui/LayoutIcons';
 import { DEFECT_TYPES, defectKey } from './inspectionTypes';
 
 export interface InspectionCanvasWorkspaceProps {
@@ -256,12 +257,7 @@ export const InspectionCanvasWorkspace: React.FC<InspectionCanvasWorkspaceProps>
         </span>
       </div>
 
-      <div
-        className="mp-insp-workspace"
-        style={{
-          gridTemplateColumns: panelCollapsed ? '52px minmax(0, 1fr)' : '52px minmax(0, 1fr) 368px'
-        }}
-      >
+      <div className={`mp-insp-workspace ${panelCollapsed ? 'is-panel-collapsed' : ''}`}>
         <section className="mp-insp-track-card" title="全卷位置导轨：点击跳转">
           <div className="mp-insp-track-label">全卷</div>
           <div
@@ -366,13 +362,26 @@ export const InspectionCanvasWorkspace: React.FC<InspectionCanvasWorkspaceProps>
           </div>
         </section>
 
-        <section className="mp-insp-side-card" style={panelCollapsed ? { display: 'none' } : undefined}>
+        <section
+          className={`mp-insp-side-card ${panelCollapsed ? 'is-collapsed' : ''}`}
+          aria-hidden={panelCollapsed || undefined}
+        >
           <div className="pane-h">
             <span>疵点记录</span>
             <span className="sp" />
             <span className="sub num">
               已入档 {allDefects.length - pending.length} · 待保存 {pending.length}
             </span>
+            <button
+              type="button"
+              className="wb-pane-collapse-btn"
+              aria-label="收起疵点记录栏"
+              title="收起疵点记录栏"
+              tabIndex={panelCollapsed ? -1 : undefined}
+              onClick={onTogglePanelCollapsed}
+            >
+              <CollapseRightIcon />
+            </button>
           </div>
           <div className="pane-b">
             <div id="editor">

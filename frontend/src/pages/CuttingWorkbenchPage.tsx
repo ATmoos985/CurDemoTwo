@@ -93,6 +93,61 @@ export const CuttingWorkbenchPage: React.FC<{
   const [rightCollapsed, setRightCollapsed] = useState<boolean>(
     () => typeof window !== 'undefined' && window.innerWidth <= 1120
   );
+  const preFocusPanesRef = useRef<{ left: boolean; right: boolean }>({
+    left: false,
+    right: false
+  });
+  const isCanvasFocused = leftCollapsed && rightCollapsed;
+
+  const handleToggleFocusCanvas = () => {
+    if (isCanvasFocused) {
+      const prev = preFocusPanesRef.current;
+      const restoreLeft = prev.left && prev.right ? false : prev.left;
+      const restoreRight = prev.left && prev.right ? false : prev.right;
+      setLeftCollapsed(restoreLeft);
+      setRightCollapsed(restoreRight);
+      return;
+    }
+    preFocusPanesRef.current = { left: leftCollapsed, right: rightCollapsed };
+    setLeftCollapsed(true);
+    setRightCollapsed(true);
+  };
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (e.code === 'BracketLeft') {
+        e.preventDefault();
+        setLeftCollapsed((v) => !v);
+      } else if (e.code === 'BracketRight') {
+        e.preventDefault();
+        setRightCollapsed((v) => !v);
+      } else if (e.code === 'Backslash') {
+        e.preventDefault();
+        if (leftCollapsed && rightCollapsed) {
+          const prev = preFocusPanesRef.current;
+          setLeftCollapsed(prev.left && prev.right ? false : prev.left);
+          setRightCollapsed(prev.left && prev.right ? false : prev.right);
+        } else {
+          preFocusPanesRef.current = { left: leftCollapsed, right: rightCollapsed };
+          setLeftCollapsed(true);
+          setRightCollapsed(true);
+        }
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [leftCollapsed, rightCollapsed]);
 
   useEffect(() => {
     setShowPath(s.settings.showPath);
@@ -597,10 +652,8 @@ export const CuttingWorkbenchPage: React.FC<{
         leftPaneRef,
         rightPaneRef,
         stripRef,
-        leftCollapsed,
-        rightCollapsed,
-        onToggleLeftPane: () => setLeftCollapsed((v) => !v),
-        onToggleRightPane: () => setRightCollapsed((v) => !v),
+        isCanvasFocused,
+        onToggleFocusCanvas: handleToggleFocusCanvas,
         pendingDraftCount: draftInbox.pendingCount,
         onOpenDraftInbox: draftInbox.openDrawer,
         canvasMode: s.canvasMode,
@@ -638,6 +691,8 @@ export const CuttingWorkbenchPage: React.FC<{
       }}
       sidebarProps={{
         leftPaneRef,
+        collapsed: leftCollapsed,
+        onCollapse: () => setLeftCollapsed(true),
         is2D,
         demandSourceTab,
         setDemandSourceTab,
@@ -675,6 +730,10 @@ export const CuttingWorkbenchPage: React.FC<{
         is2D,
         stripRef,
         boardRef,
+        leftCollapsed,
+        rightCollapsed,
+        onExpandLeftPane: () => setLeftCollapsed(false),
+        onExpandRightPane: () => setRightCollapsed(false),
         vertical: s.settings.vertical,
         onToggleVertical: () => s.updateStudioSettings({ ...s.settings, vertical: !s.settings.vertical }),
         startCorner: s.settings.startCorner,
@@ -737,6 +796,8 @@ export const CuttingWorkbenchPage: React.FC<{
       }}
       rightProps={{
         rightPaneRef,
+        collapsed: rightCollapsed,
+        onCollapse: () => setRightCollapsed(true),
         is2D,
         schemes2D: s.schemes2D,
         activeScheme2D,

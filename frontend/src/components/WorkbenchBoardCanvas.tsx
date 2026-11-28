@@ -32,6 +32,7 @@ import { attachWorkbenchKeyboard } from './canvas/canvasKeyboard';
 import { renderBaseLayer } from './canvas/canvasBaseLayer';
 import { renderPiecesLayer } from './canvas/canvasPiecesLayer';
 import { renderToolpathLayer } from './canvas/canvasToolpathLayer';
+import { ZoomMinusIcon, ZoomPlusIcon } from './ui/LayoutIcons';
 
 export type {
   BoardPoint,
@@ -399,8 +400,33 @@ export const WorkbenchBoardCanvas: React.FC<WorkbenchBoardCanvasProps> = ({
           {dragFeedback.text}
         </div>
       )}
-      <div className="wb-board-zoom-pill num" aria-hidden="true">
-        {zoomPct}%
+      <div className="wb-board-zoom-pill num" role="group" aria-label="画布缩放控制">
+        <button
+          type="button"
+          className="wb-zoom-step"
+          aria-label="缩小画布"
+          title="缩小画布"
+          onClick={() => cam.zoomBy(1 / 1.25)}
+        >
+          <ZoomMinusIcon />
+        </button>
+        <button
+          type="button"
+          className="wb-zoom-pct"
+          title="点击平滑居中适配画布"
+          onClick={() => cam.fitView()}
+        >
+          {zoomPct}%
+        </button>
+        <button
+          type="button"
+          className="wb-zoom-step"
+          aria-label="放大画布"
+          title="放大画布"
+          onClick={() => cam.zoomBy(1.25)}
+        >
+          <ZoomPlusIcon />
+        </button>
       </div>
     </div>
   );

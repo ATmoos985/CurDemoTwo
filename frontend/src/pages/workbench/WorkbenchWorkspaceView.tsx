@@ -189,9 +189,9 @@ export const WorkbenchWorkspaceView: React.FC<WorkbenchWorkspaceViewProps> = ({
       )}
 
       <div className={splitCls}>
-        {!leftCollapsed && <WorkbenchDemandSidebar {...sidebarProps} />}
+        <WorkbenchDemandSidebar {...sidebarProps} />
         <WorkbenchCenterPanel {...centerProps} />
-        {!rightCollapsed && <WorkbenchRightPanel {...rightProps} />}
+        <WorkbenchRightPanel {...rightProps} />
       </div>
 
       <WorkbenchSwitchConfirmModal

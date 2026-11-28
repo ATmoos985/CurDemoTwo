@@ -16,11 +16,16 @@ import { SlittingStripBar } from './SlittingStripBar';
 import { DefectScheduleRow } from './workbenchTypes';
 import { WorkbenchContextMenu } from './WorkbenchContextMenu';
 import { ToolpathPlayerBar } from './ToolpathPlayerBar';
+import { ExpandLeftIcon, ExpandRightIcon } from '../../components/ui/LayoutIcons';
 
 export interface WorkbenchCenterPanelProps {
   is2D: boolean;
   stripRef: RefObject<HTMLDivElement | null>;
   boardRef: RefObject<WorkbenchBoardHandle | null>;
+  leftCollapsed?: boolean;
+  rightCollapsed?: boolean;
+  onExpandLeftPane?: () => void;
+  onExpandRightPane?: () => void;
 
   // 2D view
   vertical: boolean;
@@ -96,6 +101,10 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
   is2D,
   stripRef,
   boardRef,
+  leftCollapsed = false,
+  rightCollapsed = false,
+  onExpandLeftPane,
+  onExpandRightPane,
   vertical,
   onToggleVertical,
   startCorner,
@@ -364,6 +373,30 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
         )}
 
         <div className="canvas-wrap" style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+          {leftCollapsed && onExpandLeftPane && (
+            <button
+              type="button"
+              className="wb-edge-recall-btn is-left"
+              onClick={onExpandLeftPane}
+              aria-label="展开需求栏"
+              title="展开需求栏 (Alt+[)"
+            >
+              <ExpandLeftIcon />
+              <span>需求</span>
+            </button>
+          )}
+          {rightCollapsed && onExpandRightPane && (
+            <button
+              type="button"
+              className="wb-edge-recall-btn is-right"
+              onClick={onExpandRightPane}
+              aria-label="展开方案栏"
+              title="展开方案栏 (Alt+])"
+            >
+              <span>方案</span>
+              <ExpandRightIcon />
+            </button>
+          )}
           <WorkbenchBoardCanvas
             rollTitle={effectiveRollTitle}
             rollWidthMm={effectiveRollWidthMm}
@@ -520,7 +553,35 @@ export const WorkbenchCenterPanel: React.FC<WorkbenchCenterPanelProps> = ({
 
   return (
     /* 1D Slitting Center View */
-    <section ref={stripRef as any} className="pane" style={{ background: 'var(--bg)' }}>
+    <section
+      ref={stripRef as any}
+      className="pane studio-center-1d"
+      style={{ background: 'var(--bg)', position: 'relative' }}
+    >
+      {leftCollapsed && onExpandLeftPane && (
+        <button
+          type="button"
+          className="wb-edge-recall-btn is-left is-1d"
+          onClick={onExpandLeftPane}
+          aria-label="展开需求栏"
+          title="展开需求栏 (Alt+[)"
+        >
+          <ExpandLeftIcon />
+          <span>需求</span>
+        </button>
+      )}
+      {rightCollapsed && onExpandRightPane && (
+        <button
+          type="button"
+          className="wb-edge-recall-btn is-right is-1d"
+          onClick={onExpandRightPane}
+          aria-label="展开方案栏"
+          title="展开方案栏 (Alt+])"
+        >
+          <span>方案</span>
+          <ExpandRightIcon />
+        </button>
+      )}
       <div className="body" style={{ overflowY: 'auto' }}>
         {slitSchemes.length === 0 ? (
           <div className="box slit-empty-box">
