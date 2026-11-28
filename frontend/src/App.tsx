@@ -18,7 +18,21 @@ import {
   buildLoginHash,
   parseHashRoute
 } from './utils/routeUtils';
-import { NavCategory, buildNavCategories } from './components/navCategories';
+import { NavCategory, buildNavCategories, getNavItemIconByPage } from './components/navCategories';
+import { WorkspaceTabBar } from './components/WorkspaceTabBar';
+import { AccountMenuDrawer } from './components/AccountMenuDrawer';
+import { canAccessAdminSecurity } from './utils/securityApi';
+import {
+  WorkspaceTabItem,
+  closeAllClosableTabs,
+  closeOtherWorkspaceTabs,
+  closeWorkspaceTab,
+  loadInitialWorkspaceTabs,
+  normalizeTabPageId,
+  pruneUnauthorizedTabs,
+  saveWorkspaceTabs,
+  syncTabsWithRoute
+} from './utils/workspaceTabs';
 
 // 非首屏业务页面采用路由级 React.lazy 拆包，显著削减首屏入口包体积
 const ClusterCenterPage = lazy(() =>
@@ -56,9 +70,6 @@ const CostAnalyticsPage = lazy(() =>
 );
 const LoginPage = lazy(() =>
   import('./pages/LoginPage').then((m) => ({ default: m.LoginPage }))
-);
-const ProfilePage = lazy(() =>
-  import('./pages/ProfilePage').then((m) => ({ default: m.ProfilePage }))
 );
 const UsersAdminPage = lazy(() =>
   import('./pages/UsersAdminPage').then((m) => ({ default: m.UsersAdminPage }))
@@ -119,11 +130,17 @@ export const App: React.FC = () => {
       !location.hash || location.hash === '#/' || location.hash === '#'
         ? WORKBENCH_DEFAULT_ROUTE
         : parseHashRoute(location.hash);
-    return initial.page === 'settings' ? WORKBENCH_DEFAULT_ROUTE : initial;
+    return initial.page === 'settings' || initial.page === 'profile'
+      ? WORKBENCH_DEFAULT_ROUTE
+      : initial;
   });
   const [settingsOpen, setSettingsOpen] = useState<boolean>(() => {
     const initial = parseHashRoute(location.hash);
     return initial.page === 'settings';
+  });
+  const [profileOpen, setProfileOpen] = useState<boolean>(() => {
+    const initial = parseHashRoute(location.hash);
+    return initial.page === 'profile';
   });
   const [settingsTab, setSettingsTab] = useState<SettingsTabId>(() => {
     const initial = parseHashRoute(location.hash);
@@ -173,9 +190,30 @@ export const App: React.FC = () => {
 
   const { candidateCount, clusterCount, enabledAlgoCount } = useWorkspaceNavBadges();
 
+  const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTabItem[]>(() => {
+    const initial =
+      !location.hash || location.hash === '#/' || location.hash === '#'
+        ? WORKBENCH_DEFAULT_ROUTE
+        : parseHashRoute(location.hash);
+    const contentInitial =
+      initial.page === 'settings' || initial.page === 'profile'
+        ? WORKBENCH_DEFAULT_ROUTE
+        : initial;
+    return loadInitialWorkspaceTabs(contentInitial, true, location.hash);
+  });
+
   const openSettings = (tab: SettingsTabId = 'general') => {
+    setProfileOpen(false);
     setSettingsTab(tab);
     setSettingsOpen(true);
+  };
+
+  const openProfileDrawer = () => {
+    setSettingsOpen(false);
+    setProfileOpen(true);
+    if (location.hash !== '#/profile') {
+      location.hash = '#/profile';
+    }
   };
 
   useEffect(() => {
@@ -189,9 +227,14 @@ export const App: React.FC = () => {
         const candidate = next.params[0] as SettingsTabId | undefined;
         setSettingsTab(candidate && VALID_SETTINGS_TABS.includes(candidate) ? candidate : 'general');
         setSettingsOpen(true);
+        setProfileOpen(false);
+      } else if (next.page === 'profile') {
+        setProfileOpen(true);
+        setSettingsOpen(false);
       } else {
         setLastContentRoute(next);
         setSettingsOpen(false);
+        setProfileOpen(false);
       }
     };
     const onOpenEvent = (ev: Event) => {
@@ -315,11 +358,75 @@ export const App: React.FC = () => {
     setExpandedCats((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const effectiveRoute = route.page === 'settings' ? lastContentRoute : route;
+  const effectiveRoute =
+    route.page === 'settings' || route.page === 'profile' ? lastContentRoute : route;
+  const adminVisible = canAccessAdminSecurity(auth);
+  const activeTabId = normalizeTabPageId(effectiveRoute.page);
+
+  useEffect(() => {
+    if (!authLoaded) return;
+    setWorkspaceTabs((prev) => {
+      const pruned = pruneUnauthorizedTabs(prev, adminVisible);
+      const rawHash =
+        route.page === 'settings' || route.page === 'profile'
+          ? `#/${effectiveRoute.rawKey || effectiveRoute.page}`
+          : location.hash || `#/${effectiveRoute.rawKey || effectiveRoute.page}`;
+      const next = syncTabsWithRoute(pruned, effectiveRoute, rawHash, adminVisible);
+      saveWorkspaceTabs(next);
+      return next;
+    });
+  }, [authLoaded, adminVisible, effectiveRoute, route.page]);
+
+  const handleSelectWorkspaceTab = (tab: WorkspaceTabItem) => {
+    if (location.hash !== tab.href) {
+      location.hash = tab.href;
+    } else if (route.page === 'profile' || route.page === 'settings') {
+      setProfileOpen(false);
+      setSettingsOpen(false);
+      location.hash = tab.href;
+    }
+  };
+
+  const handleCloseWorkspaceTab = (tabId: string) => {
+    setWorkspaceTabs((prev) => {
+      const { nextTabs, nextHref } = closeWorkspaceTab(prev, tabId, activeTabId);
+      saveWorkspaceTabs(nextTabs);
+      if (nextHref) {
+        location.hash = nextHref;
+      }
+      return nextTabs;
+    });
+  };
+
+  const handleCloseOtherTabs = (keepId: string) => {
+    setWorkspaceTabs((prev) => {
+      const next = closeOtherWorkspaceTabs(prev, keepId);
+      saveWorkspaceTabs(next);
+      return next;
+    });
+  };
+
+  const handleCloseAllTabs = () => {
+    setWorkspaceTabs((prev) => {
+      const next = closeAllClosableTabs(prev);
+      saveWorkspaceTabs(next);
+      if (activeTabId !== 'workbench') {
+        location.hash = next[0]?.href || '#/workbench';
+      }
+      return next;
+    });
+  };
 
   const handleSettingsClose = () => {
     setSettingsOpen(false);
     if (route.page === 'settings') {
+      location.hash = `#/${lastContentRoute.rawKey || 'workbench'}`;
+    }
+  };
+
+  const handleProfileClose = () => {
+    setProfileOpen(false);
+    if (route.page === 'profile') {
       location.hash = `#/${lastContentRoute.rawKey || 'workbench'}`;
     }
   };
@@ -369,14 +476,6 @@ export const App: React.FC = () => {
             groupQuery={effectiveRoute.groupQuery}
           />
         );
-      case 'profile':
-        return (
-          <ProfilePage
-            auth={auth}
-            onRefreshAuth={handleRefreshAuth}
-            onLogout={handleLogout}
-          />
-        );
       case 'users':
         return <UsersAdminPage auth={auth} />;
       case 'audit-logs':
@@ -388,6 +487,7 @@ export const App: React.FC = () => {
 
   const isSettingsRoute = route.page === 'settings';
   const isModalVisible = settingsOpen || isSettingsRoute;
+  const isProfileVisible = profileOpen || route.page === 'profile';
 
   if (!authLoaded) {
     return (
@@ -470,71 +570,6 @@ export const App: React.FC = () => {
         </div>
 
         <div className="nav-foot">
-          {auth.enabled && (
-            <div
-              className="mp-auth-foot-card"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: navCollapsed ? 'center' : 'space-between',
-                gap: 6,
-                padding: navCollapsed ? '6px 4px' : '6px 8px',
-                marginBottom: 6,
-                borderRadius: 6,
-                border: '1px solid var(--line-2, rgba(148,163,184,0.28))',
-                background: 'var(--panel-2, rgba(15,23,42,0.04))',
-                fontSize: 11.5
-              }}
-              title={
-                auth.authenticated
-                  ? `当前操作员：${auth.displayName} (${auth.username}) · ${roleDisplayName(auth.role)}`
-                  : '企业认证已开启，等待登录'
-              }
-            >
-              {navCollapsed ? (
-                <a
-                  href="#/profile"
-                  className="mp-foot-action"
-                  style={{ width: '100%', padding: 2 }}
-                  aria-label="个人中心"
-                  title={`${auth.displayName} (${roleDisplayName(auth.role)}) · 点击进入个人中心`}
-                >
-                  <span className="num" style={{ fontWeight: 700 }}>
-                    {(auth.displayName || auth.username || 'U').slice(0, 1).toUpperCase()}
-                  </span>
-                </a>
-              ) : (
-                <>
-                  <a href="#/profile" className="mp-auth-foot-profile-link" title="前往个人中心">
-                    <div
-                      style={{
-                        fontWeight: 600,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap'
-                      }}
-                    >
-                      {auth.authenticated ? auth.displayName || auth.username : '未登录'}
-                    </div>
-                    <div style={{ fontSize: 10.5, opacity: 0.75 }}>
-                      {auth.authenticated ? roleDisplayName(auth.role) : '等待身份认证'}
-                    </div>
-                  </a>
-                  {auth.authenticated && (
-                    <button
-                      type="button"
-                      className="btn sm"
-                      style={{ padding: '2px 7px', fontSize: 11, flex: 'none' }}
-                      onClick={() => void handleLogout()}
-                    >
-                      登出
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
-          )}
-
           <div className="mp-nav-foot-actions">
             <a
               href="#/settings"
@@ -642,7 +677,31 @@ export const App: React.FC = () => {
       </button>
 
       <main className="main" id="main" key={authReloadKey}>
-        <Suspense fallback={<RouteLoadingFallback />}>{renderMain()}</Suspense>
+        <header className="mp-global-topbar" aria-label="工作页签与个人中心">
+          <WorkspaceTabBar
+            tabs={workspaceTabs}
+            activeTabId={activeTabId}
+            navCollapsed={navCollapsed}
+            onToggleNavCollapsed={toggleNavCollapsed}
+            onSelectTab={handleSelectWorkspaceTab}
+            onCloseTab={handleCloseWorkspaceTab}
+            onCloseOthers={handleCloseOtherTabs}
+            onCloseAll={handleCloseAllTabs}
+            renderIcon={getNavItemIconByPage}
+          />
+          <AccountMenuDrawer
+            auth={auth}
+            drawerOpen={isProfileVisible}
+            onOpenDrawer={openProfileDrawer}
+            onCloseDrawer={handleProfileClose}
+            onRefreshAuth={handleRefreshAuth}
+            onLogout={handleLogout}
+            onOpenSettings={() => openSettings('general')}
+          />
+        </header>
+        <div className="mp-main-viewport">
+          <Suspense fallback={<RouteLoadingFallback />}>{renderMain()}</Suspense>
+        </div>
       </main>
 
       <SettingsModal

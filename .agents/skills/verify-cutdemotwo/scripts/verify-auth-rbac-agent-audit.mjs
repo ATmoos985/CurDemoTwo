@@ -13,7 +13,7 @@
  *    冷启动就绪 <=30s、总账 BALANCED、多页低延迟遍历、12 路并发读写无 OOM、/actuator/prometheus 核实堆上限 <= 268435456、
  *    恶意 size/limit=100000 截断/400、高页码/高偏移/负游标边界、空筛选 UI/API、非 ADMIN/未登录访问 /actuator/prometheus 403/401、
  *    优雅重启前后持久化与 BALANCED 一致性；
- *  - Tier 3（4 组）：T3-F10×F11-01、T3-F11×F08-01、T3-F12×F11-01、T3-F10×F02-01（13 vs 15 导航数）。
+ *  - Tier 3（4 组）：T3-F10×F11-01、T3-F11×F08-01、T3-F12×F11-01、T3-F10×F02-01（12 vs 14 导航数）。
  *
  * 严禁连接正式 8080 端口或修改正式 data/cutdemo-state.json。
  */
@@ -425,7 +425,7 @@ async function loginInBrowser(page, targetBaseUrl, username, password, initialPa
   await page.locator('#login-username').fill(username);
   await page.locator('#login-password').fill(password);
   await page.getByRole('button', { name: '登录并进入系统', exact: true }).click();
-  await page.locator('.mp-auth-foot-card').waitFor({ state: 'visible', timeout: 15000 });
+  await page.locator('[data-testid="account-menu-trigger"]').waitFor({ state: 'visible', timeout: 15000 });
 }
 
 async function openMcpClient(targetBaseUrl, agentToken) {
@@ -504,16 +504,17 @@ try {
 
     await adminPage.waitForFunction(() => window.location.hash === '#/results', null, { timeout: 15000 });
     await adminPage.getByRole('heading', { name: '结果管理', level: 1 }).waitFor({ state: 'visible', timeout: 15000 });
-    await adminPage.locator('.mp-auth-foot-card').waitFor({ state: 'visible', timeout: 10000 });
+    await adminPage.locator('[data-testid="account-menu-trigger"]').waitFor({ state: 'visible', timeout: 10000 });
     const navGroups = await adminPage.locator('nav .nav-group').count();
     const navItems = await adminPage.locator('nav .nav-main a[href^="#/"]').count();
     assert.equal(navGroups, 6, `ADMIN 侧栏应有 6 组导航，实际: ${navGroups}`);
-    assert.equal(navItems, 15, `ADMIN 侧栏应有 15 项导航，实际: ${navItems}`);
+    assert.equal(navItems, 14, `ADMIN 侧栏应有 14 项导航，实际: ${navItems}`);
     return { redirectHash, navGroups, navItems };
   });
 
   await runCheck('T1-F10-02', 'Tier1', 'F10', async () => {
-    await adminPage.locator('.mp-auth-foot-profile-link').click();
+    await adminPage.locator('[data-testid="account-menu-trigger"]').click();
+    await adminPage.locator('[data-testid="account-open-profile"]').click();
     await adminPage.waitForFunction(() => window.location.hash === '#/profile', null, { timeout: 10000 });
     await adminPage.getByRole('heading', { name: '个人中心', exact: true, level: 1 }).waitFor({
       state: 'visible',
@@ -526,6 +527,8 @@ try {
     assert.ok(text.includes('USER（人工操作员）'), '个人中心应展示主体类型');
     assert.ok(text.includes('系统管理员') && text.includes('ADMIN'), '个人中心应展示角色摘要');
     assert.ok(!text.includes('无过期限制'), '企业认证下应展示具体令牌过期时间');
+    await adminPage.getByRole('button', { name: '关闭个人中心', exact: true }).click();
+    await adminPage.waitForFunction(() => window.location.hash === '#/results', null, { timeout: 10000 });
     return { profileVerified: true };
   });
 
@@ -559,7 +562,8 @@ try {
 
   await runCheck('T1-F10-04', 'Tier1', 'F10', async () => {
     await loginInBrowser(userPage, baseUrl, testUser, 'InitPass#1');
-    await userPage.locator('.mp-auth-foot-profile-link').click();
+    await userPage.locator('[data-testid="account-menu-trigger"]').click();
+    await userPage.locator('[data-testid="account-open-profile"]').click();
     await userPage.waitForFunction(() => window.location.hash === '#/profile', null, { timeout: 10000 });
 
     await userPage.locator('#profile-cur-pwd').fill('InitPass#1');
@@ -575,7 +579,7 @@ try {
     await userPage.locator('#login-username').fill(testUser);
     await userPage.locator('#login-password').fill('NewPass#2');
     await userPage.getByRole('button', { name: '登录并进入系统', exact: true }).click();
-    await userPage.locator('.mp-auth-foot-card').waitFor({ state: 'visible', timeout: 15000 });
+    await userPage.locator('[data-testid="account-menu-trigger"]').waitFor({ state: 'visible', timeout: 15000 });
     return { passwordChangedAndRelogged: true };
   });
 
@@ -2146,25 +2150,28 @@ try {
 
   await runCheck('T3-F10×F02-01', 'Tier3', 'F10×F02', async () => {
     await plannerPage.goto(`${baseUrl}/app/#/workbench`, { waitUntil: 'networkidle' });
+    const plannerGroupCount = await plannerPage.locator('nav .nav-group').count();
     const plannerNavCount = await plannerPage.locator('nav .nav-main a[href^="#/"]').count();
-    assert.equal(plannerNavCount, 13, `PLANNER 导航数应为 13，实际 ${plannerNavCount}`);
-    assert.equal(await plannerPage.locator('nav .nav-main a[href="#/profile"]').count(), 1);
+    assert.equal(plannerGroupCount, 5, `PLANNER 分组应为 5，实际 ${plannerGroupCount}`);
+    assert.equal(plannerNavCount, 12, `PLANNER 导航数应为 12，实际 ${plannerNavCount}`);
+    assert.equal(await plannerPage.locator('nav .nav-main a[href="#/profile"]').count(), 0);
     assert.equal(await plannerPage.locator('nav .nav-main a[href="#/users"]').count(), 0);
     assert.equal(await plannerPage.locator('nav .nav-main a[href="#/audit-logs"]').count(), 0);
 
-    await plannerPage.locator('.mp-auth-foot-card').getByRole('button', { name: '登出', exact: true }).click();
+    await plannerPage.locator('[data-testid="account-menu-trigger"]').click();
+    await plannerPage.locator('[data-testid="account-logout-btn"]').click();
     await plannerPage.waitForFunction(() => window.location.hash.startsWith('#/login'), null, { timeout: 15000 });
 
     await plannerPage.locator('#login-username').fill(authAdminUser);
     await plannerPage.locator('#login-password').fill(authAdminPass);
     await plannerPage.getByRole('button', { name: '登录并进入系统', exact: true }).click();
-    await plannerPage.locator('.mp-auth-foot-card').waitFor({ state: 'visible', timeout: 15000 });
+    await plannerPage.locator('[data-testid="account-menu-trigger"]').waitFor({ state: 'visible', timeout: 15000 });
 
     const adminNavCount = await plannerPage.locator('nav .nav-main a[href^="#/"]').count();
     const adminGroupCount = await plannerPage.locator('nav .nav-group').count();
     assert.equal(adminGroupCount, 6, `ADMIN 分组应为 6，实际 ${adminGroupCount}`);
-    assert.equal(adminNavCount, 15, `ADMIN 导航数应为 15，实际 ${adminNavCount}`);
-    return { plannerNavCount, adminNavCount, adminGroupCount };
+    assert.equal(adminNavCount, 14, `ADMIN 导航数应为 14，实际 ${adminNavCount}`);
+    return { plannerGroupCount, plannerNavCount, adminNavCount, adminGroupCount };
   });
 } catch (err) {
   failedError = err;

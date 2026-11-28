@@ -575,6 +575,283 @@ body {
 }
 
 /* ==========================================================================
+   1.5 Global Topbar (40px Workspace Tabs + Account Menu Trigger)
+   ========================================================================== */
+
+.app.app-magpie .main > .mp-global-topbar {
+  flex: 0 0 40px;
+  height: 40px;
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 12px 0 8px;
+  background: var(--cp-sidebar);
+  border-bottom: 1px solid var(--cp-divider);
+  position: relative;
+  z-index: 25;
+}
+
+.mp-main-viewport {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.mp-tabs-region {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+}
+
+.mp-topbar-nav-toggle {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--cp-ink-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+
+.mp-topbar-nav-toggle:hover {
+  background: rgba(15, 23, 42, 0.055);
+  color: var(--cp-ink);
+}
+
+.mp-tabs-strip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 4px 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.mp-tabs-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.mp-tab-item {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  max-width: 168px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--cp-ink-2);
+  transition:
+    background-color 0.14s ease,
+    border-color 0.14s ease,
+    color 0.14s ease,
+    box-shadow 0.14s ease;
+}
+
+.mp-tab-item:hover {
+  background: rgba(15, 23, 42, 0.045);
+  color: var(--cp-ink);
+}
+
+.mp-tab-item.is-active {
+  background: var(--cp-surface);
+  color: var(--cp-ink);
+  border-color: var(--cp-border);
+  box-shadow: var(--cp-shadow-pill);
+}
+
+.mp-tab-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  min-width: 0;
+  padding: 0 10px;
+  color: inherit;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.mp-tab-item.is-active .mp-tab-link {
+  font-weight: 600;
+}
+
+.mp-tab-item:not(.is-pinned) .mp-tab-link {
+  padding-right: 4px;
+}
+
+.mp-tab-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  color: var(--cp-ink-3);
+}
+
+.mp-tab-ico svg {
+  width: 13.5px;
+  height: 13.5px;
+}
+
+.mp-tab-item.is-active .mp-tab-ico {
+  color: var(--cp-accent);
+}
+
+.mp-tab-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mp-tab-close {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-right: 5px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--cp-ink-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: background-color 0.12s ease, color 0.12s ease, opacity 0.12s ease;
+}
+
+.mp-tab-item:hover .mp-tab-close,
+.mp-tab-item.is-active .mp-tab-close {
+  opacity: 1;
+}
+
+.mp-tab-close:hover {
+  background: rgba(15, 23, 42, 0.085);
+  color: var(--cp-ink);
+}
+
+.mp-tabs-more-wrap {
+  position: relative;
+  flex: none;
+}
+
+.mp-tabs-more-btn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--cp-ink-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+
+.mp-tabs-more-btn:hover,
+.mp-tabs-more-btn.is-open {
+  background: var(--cp-surface);
+  border-color: var(--cp-border);
+  color: var(--cp-ink);
+}
+
+.mp-tabs-more-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 204px;
+  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid var(--cp-border);
+  background: var(--cp-surface);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.05);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mp-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--cp-ink);
+  font-size: 12.5px;
+  font-weight: 500;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.mp-menu-item:hover:not([disabled]) {
+  background: var(--cp-surface-subtle);
+}
+
+.mp-menu-item[disabled] {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.mp-menu-item.is-danger {
+  color: var(--err);
+}
+
+.mp-menu-item.is-danger:hover:not([disabled]) {
+  background: var(--err-bg);
+}
+
+.mp-menu-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--cp-ink-3);
+}
+
+.mp-menu-divider {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--cp-divider);
+}
+
+@media print {
+  .mp-global-topbar,
+  .mp-tabs-more-menu,
+  .mp-account-popover,
+  .mp-account-drawer-backdrop {
+    display: none !important;
+  }
+}
+
+/* ==========================================================================
    2. Unified Light Controls: Buttons, Inputs, Segmented Controls, Switches
    ========================================================================== */
 

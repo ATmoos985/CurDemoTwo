@@ -851,7 +851,7 @@ async function setTokenAndGoto(page, targetBaseUrl, token, hashPath) {
   }, token || '');
   await page.goto(`${targetBaseUrl}/app/?v=${Date.now()}${normalizedHash}`, { waitUntil: 'networkidle' });
   if (token) {
-    await page.locator('.mp-auth-foot-card').waitFor({ state: 'visible', timeout: 15000 });
+    await page.locator('[data-testid="account-menu-trigger"]').waitFor({ state: 'visible', timeout: 15000 });
   }
 }
 
@@ -863,7 +863,7 @@ async function loginViaUi(page, targetBaseUrl, username, password, targetHash = 
   await page.locator('#login-username').fill(username);
   await page.locator('#login-password').fill(password);
   await page.getByRole('button', { name: '登录并进入系统', exact: true }).click();
-  await page.locator('.mp-auth-foot-card').waitFor({ state: 'visible', timeout: 15000 });
+  await page.locator('[data-testid="account-menu-trigger"]').waitFor({ state: 'visible', timeout: 15000 });
   if (targetHash) {
     await page.goto(`${targetBaseUrl}/app/${targetHash}`, { waitUntil: 'networkidle' });
   }

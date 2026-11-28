@@ -701,3 +701,66 @@
   background: rgba(56, 189, 248, 0.16);
   color: #7dd3fc;
 }
+
+/* 顶部工作页签栏与右上角个人中心暗色高对比覆盖 */
+:root[data-theme="dark"] .app.app-magpie .main > .mp-global-topbar {
+  background: #0f172a;
+  border-bottom-color: rgba(148, 163, 184, 0.16);
+}
+
+:root[data-theme="dark"] .mp-topbar-nav-toggle:hover,
+:root[data-theme="dark"] .mp-tab-item:hover {
+  background: rgba(148, 163, 184, 0.12);
+  color: #f8fafc;
+}
+
+:root[data-theme="dark"] .mp-tab-item.is-active {
+  background: #162133;
+  border-color: rgba(148, 163, 184, 0.28);
+  color: #f8fafc;
+}
+
+:root[data-theme="dark"] .mp-tab-close:hover {
+  background: rgba(148, 163, 184, 0.2);
+  color: #ffffff;
+}
+
+:root[data-theme="dark"] .mp-tabs-more-btn:hover,
+:root[data-theme="dark"] .mp-tabs-more-btn.is-open {
+  background: #162133;
+  border-color: rgba(148, 163, 184, 0.28);
+  color: #f8fafc;
+}
+
+:root[data-theme="dark"] .mp-tabs-more-menu,
+:root[data-theme="dark"] .mp-account-popover {
+  background: #162133;
+  border-color: rgba(148, 163, 184, 0.26);
+  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.55);
+}
+
+:root[data-theme="dark"] .mp-account-popover-head {
+  background: #0f172a;
+}
+
+:root[data-theme="dark"] .mp-account-trigger {
+  background: #162133;
+  border-color: rgba(148, 163, 184, 0.28);
+  color: #f8fafc;
+}
+
+:root[data-theme="dark"] .mp-account-trigger:hover,
+:root[data-theme="dark"] .mp-account-trigger.is-open {
+  background: #1e2d45;
+  border-color: rgba(56, 189, 248, 0.45);
+}
+
+:root[data-theme="dark"] .mp-account-drawer-backdrop {
+  background: rgba(2, 6, 23, 0.62);
+}
+
+:root[data-theme="dark"] .mp-account-drawer {
+  background: #0b1220;
+  border-left-color: rgba(148, 163, 184, 0.22);
+  box-shadow: -14px 0 40px rgba(0, 0, 0, 0.6);
+}
